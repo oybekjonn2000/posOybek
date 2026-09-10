@@ -1,0 +1,75 @@
+{
+  "name": "restaurant-pos-desktop",
+  "version": "1.0.0",
+  "description": "Restaurant POS Desktop Application",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run start:backend\" \"npm run start:frontend\" \"wait-on http://localhost:4200 && electron .\"",
+    "start:frontend": "cd ../frontend/angular-pos && ng serve",
+    "start:backend": "cd ../backend/restaurant-pos-api && mvnw.cmd spring-boot:run",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.restaurantpos.desktop",
+    "productName": "RestaurantPOS",
+    "copyright": "Copyright © 2026 RestaurantPOS",
+    "directories": {
+      "output": "../../dist/desktop"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../frontend/angular-pos/dist/angular-pos/browser",
+        "to": "app",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "RestaurantPOS",
+      "deleteAppDataOnUninstall": false,
+      "include": "installer/installer.nsh"
+    },
+    "extraFiles": [
+      {
+        "from": "../../backend/restaurant-pos-api/target",
+        "to": "backend",
+        "filter": ["restaurant-pos-api-*.jar"]
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^33.4.0",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.2"
+  }
+}

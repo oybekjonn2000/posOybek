@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: restaurant-pos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: restaurant_pos
+      POSTGRES_USER: pos_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pos_dev_pass_change_me}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos_user -d restaurant_pos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Development PostgreSQL Admin (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: restaurant-pos-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@restaurantpos.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    name: restaurant_pos_postgres_data

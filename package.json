@@ -1,0 +1,11 @@
+{
+  "name": "restaurant-pos-root",
+  "version": "1.0.0",
+  "description": "Offline-First Restaurant POS System",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix frontend/angular-pos start",
+    "start:frontend": "npm --prefix frontend/angular-pos start",
+    "build:frontend": "npm --prefix frontend/angular-pos run build"
+  }
+}
