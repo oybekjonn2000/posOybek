@@ -120,6 +120,8 @@ public class KitchenService {
 
         if (status == OrderItem.KitchenStatus.READY) {
             item.setReadyAt(Instant.now());
+        } else if (status == OrderItem.KitchenStatus.DELIVERED || status == OrderItem.KitchenStatus.SERVED) {
+            item.setDeliveredQuantity(item.getQuantity());
         }
 
         orderItemRepository.save(item);
@@ -137,5 +139,7 @@ public class KitchenService {
 
         // Barcha KDS ekranlariga umumiy xabar
         wsNotification.notifyItemReady(item.getOrder().getTenant().getId(), itemId);
+        // POS ekranlariga buyurtma yangilanganini bildirish
+        wsNotification.notifyOrderStatusChanged(item.getOrder().getTenant().getId(), orderService.toResponse(item.getOrder()));
     }
 }

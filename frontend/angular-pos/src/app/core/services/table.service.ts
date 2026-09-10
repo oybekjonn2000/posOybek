@@ -18,6 +18,9 @@ export interface RestaurantTable {
   height: number;
   status: 'FREE' | 'OCCUPIED' | 'RESERVED' | 'BILL_REQUESTED' | 'CLEANING';
   currentOrderId?: string;
+  activeOrderNumber?: string;
+  itemCount?: number;
+  totalAmount?: number;
   active: boolean;
 }
 

@@ -29,7 +29,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             Order.OrderStatus.READY
     );
 
+    List<Order.OrderStatus> HISTORY_STATUSES = List.of(
+            Order.OrderStatus.PAID
+    );
+
     default List<Order> findActiveOrders(UUID tenantId) {
         return findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, ACTIVE_STATUSES);
+    }
+
+    default List<Order> findHistoryOrders(UUID tenantId) {
+        return findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES);
     }
 }

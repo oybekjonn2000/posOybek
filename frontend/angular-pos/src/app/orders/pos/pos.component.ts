@@ -5,13 +5,25 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ProductService, Product } from '../../core/services/product.service';
 import { CategoryService, Category } from '../../core/services/category.service';
 import { TableService, RestaurantTable } from '../../core/services/table.service';
-import { OrderService, CreateOrderRequest } from '../../core/services/order.service';
+import { OrderService, CreateOrderRequest, CreateOrderItemRequest, Order } from '../../core/services/order.service';
 import { PaymentService } from '../../core/services/payment.service';
 import { NotificationService } from '../../core/services/notification.service';
 
-interface CartItem {
-  product: Product;
+export interface PosCartItem {
+  id?: string;
+  productId: string;
+  productName: string;
+  unitPrice: number;
   quantity: number;
+  sentQuantity: number;
+  subtotal: number;
+  kitchenStatus: string;
+  kitchenId?: string;
+  kitchenName?: string;
+  notes?: string;
+  voided: boolean;
+  voidReason?: string;
+  isNew: boolean;
 }
 
 @Component({
@@ -107,24 +119,60 @@ interface CartItem {
               <span>Menyudan taomlarni tanlang</span>
             </div>
           } @else {
-            @for (item of cart(); track item.product.id) {
-              <div class="cart-item">
-                <div class="cart-item__details">
-                  <div class="cart-item__title">{{ item.product.name }}</div>
-                  <div class="cart-item__unit-price">{{ formatPrice(item.product.salePrice || item.product.price || 0) }}</div>
-                </div>
+            @for (item of cart(); track getItemTrackKey(item, $index)) {
+              <div class="cart-item" [class.cart-item--new]="item.isNew" [class.cart-item--voided]="item.voided">
+                <div class="cart-item__row">
+                  <div class="cart-item__details">
+                    <div class="cart-item__title">
+                      <span>{{ item.productName }}</span>
+                      @if (item.kitchenName) {
+                        <span class="kitchen-tag">({{ item.kitchenName }})</span>
+                      }
+                    </div>
+                    <div class="cart-item__meta">
+                      <span class="cart-item__unit-price">{{ formatPrice(item.unitPrice) }}</span>
+                      <!-- STATUS PILL -->
+                      <span class="status-pill" [class]="getStatusClass(item)">
+                        {{ getStatusLabel(item) }}
+                      </span>
+                    </div>
+                    @if (item.voidReason) {
+                      <div class="void-reason-tag">⚠️ {{ item.voidReason }}</div>
+                    }
+                  </div>
 
-                <div class="cart-item__qty-controls">
-                  <button class="qty-btn" (click)="decrementQty(item)">−</button>
-                  <input type="number" class="qty-input" [(ngModel)]="item.quantity" min="1" (change)="onQtyChange(item)" />
-                  <button class="qty-btn" (click)="incrementQty(item)">+</button>
+                  <!-- Controls: If NEW -> Qty changer; If already SENT -> Sent badge & Cancel option -->
+                  @if (item.isNew && !item.voided) {
+                    <div class="cart-item__qty-controls">
+                      <button class="qty-btn" (click)="decrementQty(item)">−</button>
+                      <input type="number" class="qty-input" [(ngModel)]="item.quantity" min="1" (change)="onQtyChange(item)" />
+                      <button class="qty-btn" (click)="incrementQty(item)">+</button>
+                    </div>
+                    <div class="cart-item__subtotal">
+                      {{ formatPrice(item.unitPrice * item.quantity) }}
+                    </div>
+                    <button class="cart-item__remove" title="O'chirish" (click)="removeItem(item)">✕</button>
+                  } @else if (!item.voided) {
+                    <div class="cart-item__sent-controls">
+                      <span class="sent-qty-badge">{{ item.quantity }}x</span>
+                      @if (currentOrderId()) {
+                        <button class="btn-cancel-item" (click)="openCancelModal(item)" title="Oshxonadagi taomni bekor qilish">
+                          🚫 Bekor qilish
+                        </button>
+                      }
+                    </div>
+                    <div class="cart-item__subtotal">
+                      {{ formatPrice(item.unitPrice * item.quantity) }}
+                    </div>
+                  } @else {
+                    <div class="cart-item__voided-badge">
+                      <del>{{ item.quantity }}x</del>
+                    </div>
+                    <div class="cart-item__subtotal" style="text-decoration: line-through; opacity: 0.6;">
+                      {{ formatPrice(item.unitPrice * item.quantity) }}
+                    </div>
+                  }
                 </div>
-
-                <div class="cart-item__subtotal">
-                  {{ formatPrice((item.product.salePrice || item.product.price || 0) * item.quantity) }}
-                </div>
-
-                <button class="cart-item__remove" (click)="removeItem(item)">✕</button>
               </div>
             }
           }
@@ -148,12 +196,15 @@ interface CartItem {
           <!-- Actions -->
           <div class="cart-actions">
             <button class="btn-kitchen" 
-                    [disabled]="cart().length === 0 || isSubmitting()"
+                    [disabled]="!canSendToKitchen()"
                     (click)="sendToKitchen()">
-              👨‍🍳 Oshxonaga Yuborish
+              👨‍🍳 Oshxonaga
+              @if (newItemsCount() > 0) {
+                <span class="new-count-badge">{{ newItemsCount() }} ta yangi</span>
+              }
             </button>
             <button class="btn-pay" 
-                    [disabled]="cart().length === 0 || isSubmitting()"
+                    [disabled]="subtotal() === 0 || isSubmitting()"
                     (click)="openPaymentModal()">
               💳 To'lov Qilish
             </button>
@@ -208,21 +259,66 @@ interface CartItem {
           </div>
         </div>
       }
+
+      <!-- Cancel Item Modal -->
+      @if (showCancelModal()) {
+        <div class="modal-backdrop" (click)="closeCancelModal()">
+          <div class="modal-card" (click)="$event.stopPropagation()">
+            <div class="modal-header">
+              <h3>Taomni bekor qilish</h3>
+              <button class="modal-close" (click)="closeCancelModal()">✕</button>
+            </div>
+            <div class="modal-body">
+              <p>Stol: <strong>{{ selectedTable()?.name }}</strong></p>
+              <p>Mahsulot: <strong>{{ cancellingItem?.productName }}</strong> ({{ cancellingItem?.quantity }} ta)</p>
+              <div class="form-group" style="margin-top:12px;">
+                <label>Bekor qilinadigan miqdor</label>
+                <input type="number" [(ngModel)]="cancelQty" min="1" [max]="cancellingItem?.quantity || 1" class="pos-input" />
+              </div>
+              <div class="form-group" style="margin-top:12px;">
+                <label>Bekor qilish sababi</label>
+                <input type="text" [(ngModel)]="cancelReason" class="pos-input" placeholder="Mijoz rad etdi..." />
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn--secondary" (click)="closeCancelModal()">Yopish</button>
+              <button class="btn" style="background:#ef4444; color:white;" (click)="confirmCancelItem()" [disabled]="isSubmitting()">
+                Bekor qilishni tasdiqlash
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   `,
   styles: [`
+    :host {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+    }
     .pos-screen {
       display: grid;
-      grid-template-columns: 1fr 400px;
-      height: calc(100vh - 64px);
+      grid-template-columns: 1fr 420px;
+      flex: 1;
+      height: 100%;
+      min-height: 0;
+      max-height: 100%;
       background: var(--bg-main);
       overflow: hidden;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
     }
     .pos-menu {
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--border);
       overflow: hidden;
+      height: 100%;
+      min-height: 0;
     }
     .pos-toolbar {
       padding: 16px 20px;
@@ -363,16 +459,22 @@ interface CartItem {
       flex-direction: column;
       background: var(--bg-card);
       height: 100%;
+      max-height: 100%;
+      min-height: 0;
+      overflow: hidden;
     }
     .cart-header {
-      padding: 16px 20px;
+      flex-shrink: 0;
+      padding: 14px 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid var(--border);
+      background: var(--bg-card);
+      z-index: 2;
     }
     .cart-title {
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 800;
       display: flex;
       align-items: center;
@@ -395,12 +497,30 @@ interface CartItem {
       cursor: pointer;
     }
     .cart-items {
-      flex: 1;
-      padding: 16px;
+      flex: 1 1 0%;
+      min-height: 0; /* CRITICAL: Enables vertical scrolling when items increase */
+      padding: 14px 16px;
       overflow-y: auto;
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+
+      &::-webkit-scrollbar {
+        width: 6px;
+      }
+      &::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      &::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+      }
+      &::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
     }
     .cart-empty {
       text-align: center;
@@ -409,29 +529,74 @@ interface CartItem {
       &__icon { font-size: 40px; margin-bottom: 12px; }
     }
     .cart-item {
-      display: grid;
-      grid-template-columns: 1fr auto auto auto;
-      align-items: center;
-      gap: 10px;
-      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
       background: var(--bg-main);
       border-radius: var(--radius-sm);
       border: 1px solid var(--border);
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+
+      &--new {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.04);
+      }
+
+      &--voided {
+        opacity: 0.6;
+        background: rgba(239, 68, 68, 0.04);
+        border-color: rgba(239, 68, 68, 0.3);
+      }
+
+      &__row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      &__details {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+      }
 
       &__title {
         font-size: 14px;
         font-weight: 700;
         color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
+
+      &__meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
       &__unit-price {
         font-size: 12px;
         color: var(--text-muted);
       }
+
       &__qty-controls {
         display: flex;
         align-items: center;
         gap: 4px;
       }
+
+      &__sent-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
       &__subtotal {
         font-size: 13px;
         font-weight: 700;
@@ -439,14 +604,112 @@ interface CartItem {
         min-width: 65px;
         text-align: right;
       }
+
       &__remove {
         background: none;
         border: none;
         color: var(--danger);
         cursor: pointer;
-        font-size: 14px;
+        font-size: 16px;
+        padding: 2px 6px;
+        line-height: 1;
+        border-radius: 4px;
+        &:hover { background: rgba(239, 68, 68, 0.1); }
       }
     }
+
+    .kitchen-tag {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: normal;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+
+      &.pill--new {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fde68a;
+      }
+      &.pill--sent {
+        background: #dbeafe;
+        color: #1e40af;
+        border: 1px solid #bfdbfe;
+      }
+      &.pill--accepted {
+        background: #ede9fe;
+        color: #5b21b6;
+        border: 1px solid #ddd6fe;
+      }
+      &.pill--cooking {
+        background: #ffedd5;
+        color: #9a3412;
+        border: 1px solid #fed7aa;
+      }
+      &.pill--ready {
+        background: #d1fae5;
+        color: #065f46;
+        border: 1px solid #a7f3d0;
+      }
+      &.pill--delivered {
+        background: #ecfdf5;
+        color: #047857;
+        border: 1px solid #6ee7b7;
+      }
+      &.pill--cancelled {
+        background: #fee2e2;
+        color: #991b1b;
+        border: 1px solid #fca5a5;
+      }
+    }
+
+    .btn-cancel-item {
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 4px;
+      cursor: pointer;
+      &:hover { background: #ef4444; color: white; }
+    }
+
+    .sent-qty-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .new-count-badge {
+      display: inline-block;
+      margin-left: 6px;
+      background: #b45309;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .void-reason-tag {
+      font-size: 11px;
+      color: #ef4444;
+      font-style: italic;
+    }
+
     .qty-btn {
       width: 24px;
       height: 24px;
@@ -469,22 +732,25 @@ interface CartItem {
       font-size: 12px;
     }
     .cart-summary {
-      padding: 16px 20px;
+      flex-shrink: 0; /* CRITICAL: Never gets pushed off screen */
+      padding: 14px 18px;
       border-top: 1px solid var(--border);
       background: var(--bg-card);
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+      z-index: 2;
     }
     .summary-row {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       font-size: 13px;
       color: var(--text-secondary);
 
       &--total {
-        margin-top: 12px;
-        padding-top: 12px;
+        margin-top: 8px;
+        padding-top: 8px;
         border-top: 1px dashed var(--border);
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 800;
         color: var(--text-primary);
       }
@@ -492,17 +758,22 @@ interface CartItem {
     .cart-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 16px;
+      gap: 10px;
+      margin-top: 12px;
     }
     .btn-kitchen, .btn-pay {
-      padding: 12px;
+      padding: 11px 8px;
       border: none;
       border-radius: var(--radius-md);
       font-weight: 700;
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       transition: all var(--transition);
+      white-space: nowrap;
 
       &:disabled {
         opacity: 0.5;
@@ -626,18 +897,32 @@ export class PosComponent implements OnInit {
   selectedTable = signal<RestaurantTable | null>(null);
   currentOrderId = signal<string | null>(null);
 
-  cart = signal<CartItem[]>([]);
+  cart = signal<PosCartItem[]>([]);
   isSubmitting = signal(false);
 
   showPaymentModal = signal(false);
   paymentMethod: 'CASH' | 'CARD' = 'CASH';
   cashReceived = 0;
 
+  // Cancel item modal state
+  showCancelModal = signal(false);
+  cancellingItem: PosCartItem | null = null;
+  cancelReason = 'Mijoz rad etdi';
+  cancelQty = 1;
+
+  // Real-time calculation of unsent (NEW) items
+  newItems = computed(() =>
+    this.cart().filter(i => (i.kitchenStatus === 'NEW' || i.isNew) && !i.voided && i.quantity > 0)
+  );
+
+  newItemsCount = computed(() => this.newItems().length);
+
+  canSendToKitchen = computed(() => this.newItemsCount() > 0 && !this.isSubmitting());
+
   subtotal = computed(() => {
-    return this.cart().reduce((sum, item) => {
-      const price = item.product.salePrice || item.product.price || 0;
-      return sum + (price * item.quantity);
-    }, 0);
+    return this.cart()
+      .filter(i => !i.voided)
+      .reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
   });
 
   serviceCharge = computed(() => Math.round(this.subtotal() * 0.10));
@@ -730,66 +1015,148 @@ export class PosComponent implements OnInit {
     this.orderService.getOrderById(orderId).subscribe({
       next: (res) => {
         if (res.success && res.data) {
-          const items: CartItem[] = res.data.items.map(it => ({
-            product: {
-              id: it.productId,
-              name: it.productName,
-              salePrice: it.productPrice ?? it.unitPrice ?? 0,
-              sku: '',
-              unit: 'ta',
-              active: true,
-              available: true,
-              trackStock: false
-            },
-            quantity: it.quantity
-          }));
-          this.cart.set(items);
+          this.updateCartFromOrder(res.data);
         }
       }
     });
   }
 
-  addToCart(product: Product): void {
-    const existing = this.cart().find(item => item.product.id === product.id);
-    if (existing) {
-      this.cart.update(items =>
-        items.map(item =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        )
-      );
-    } else {
-      this.cart.update(items => [...items, { product, quantity: 1 }]);
+  updateCartFromOrder(order: Order): void {
+    const items: PosCartItem[] = (order.items || []).map(it => {
+      const isVoid = it.voided || it.kitchenStatus === 'CANCELLED';
+      const isItemNew = it.kitchenStatus === 'NEW' && !isVoid;
+      return {
+        id: it.id,
+        productId: it.productId,
+        productName: it.productName,
+        unitPrice: it.productPrice ?? it.unitPrice ?? 0,
+        quantity: it.quantity,
+        sentQuantity: it.sentQuantity ?? (!isItemNew ? it.quantity : 0),
+        subtotal: it.subtotal,
+        kitchenStatus: it.kitchenStatus || 'DELIVERED',
+        kitchenId: it.kitchenId,
+        kitchenName: it.kitchenName,
+        notes: it.notes,
+        voided: isVoid,
+        voidReason: it.voidReason,
+        isNew: isItemNew
+      };
+    });
+    this.cart.set(items);
+  }
+
+  getStatusClass(item: PosCartItem): string {
+    if (item.voided || item.kitchenStatus === 'CANCELLED') return 'pill--cancelled';
+    if (item.isNew || item.kitchenStatus === 'NEW') return 'pill--new';
+    switch (item.kitchenStatus) {
+      case 'SENT_TO_KITCHEN': return 'pill--sent';
+      case 'ACCEPTED': return 'pill--accepted';
+      case 'PREPARING':
+      case 'COOKING': return 'pill--cooking';
+      case 'READY': return 'pill--ready';
+      case 'DELIVERED':
+      case 'SERVED': return 'pill--delivered';
+      default: return 'pill--sent';
     }
   }
 
-  incrementQty(item: CartItem): void {
+  getStatusLabel(item: PosCartItem): string {
+    if (item.voided || item.kitchenStatus === 'CANCELLED') return '🔴 Bekor qilingan';
+    if (item.isNew || item.kitchenStatus === 'NEW') return '🟡 Yangi';
+    switch (item.kitchenStatus) {
+      case 'SENT_TO_KITCHEN': return '🔵 Oshxonaga yuborilgan';
+      case 'ACCEPTED': return '🟣 Qabul qilindi';
+      case 'PREPARING':
+      case 'COOKING': return '🟠 Tayyorlanmoqda';
+      case 'READY': return '🟢 Tayyor';
+      case 'DELIVERED':
+      case 'SERVED': return '✅ Yetkazilgan';
+      default: return '🔵 Oshxonaga yuborilgan';
+    }
+  }
+
+  getItemTrackKey(item: PosCartItem, index: number): string {
+    return (item.id || item.productId) + '_' + (item.isNew ? 'new' : 'sent') + '_' + index;
+  }
+
+  addToCart(product: Product): void {
+    const price = product.salePrice || product.price || 0;
+    // Look for an existing item with status 'NEW' (not yet sent to kitchen)
+    const existingNew = this.cart().find(
+      item => item.productId === product.id && (item.isNew || item.kitchenStatus === 'NEW') && !item.voided
+    );
+
+    if (existingNew) {
+      this.cart.update(items =>
+        items.map(item =>
+          item === existingNew
+            ? { ...item, quantity: item.quantity + 1, subtotal: price * (item.quantity + 1) }
+            : item
+        )
+      );
+    } else {
+      // Add as a new item row
+      const newItem: PosCartItem = {
+        productId: product.id,
+        productName: product.name,
+        unitPrice: price,
+        quantity: 1,
+        sentQuantity: 0,
+        subtotal: price,
+        kitchenStatus: 'NEW',
+        kitchenId: product.kitchenId,
+        kitchenName: product.kitchenName,
+        voided: false,
+        isNew: true
+      };
+      this.cart.update(items => [...items, newItem]);
+    }
+  }
+
+  incrementQty(item: PosCartItem): void {
     this.cart.update(items =>
-      items.map(i => i.product.id === item.product.id ? { ...i, quantity: i.quantity + 1 } : i)
+      items.map(i =>
+        i === item
+          ? { ...i, quantity: i.quantity + 1, subtotal: i.unitPrice * (i.quantity + 1) }
+          : i
+      )
     );
   }
 
-  decrementQty(item: CartItem): void {
+  decrementQty(item: PosCartItem): void {
     if (item.quantity <= 1) {
       this.removeItem(item);
     } else {
       this.cart.update(items =>
-        items.map(i => i.product.id === item.product.id ? { ...i, quantity: i.quantity - 1 } : i)
+        items.map(i =>
+          i === item
+            ? { ...i, quantity: i.quantity - 1, subtotal: i.unitPrice * (i.quantity - 1) }
+            : i
+        )
       );
     }
   }
 
-  onQtyChange(item: CartItem): void {
+  onQtyChange(item: PosCartItem): void {
     if (item.quantity <= 0) {
       this.removeItem(item);
+    } else {
+      item.subtotal = item.unitPrice * item.quantity;
+      this.cart.set([...this.cart()]);
     }
   }
 
-  removeItem(item: CartItem): void {
-    this.cart.update(items => items.filter(i => i.product.id !== item.product.id));
+  removeItem(item: PosCartItem): void {
+    this.cart.update(items => items.filter(i => i !== item));
   }
 
   clearCart(): void {
-    this.cart.set([]);
+    // If order already exists, keep already-sent items, remove only new unsent drafts
+    if (this.currentOrderId()) {
+      this.cart.update(items => items.filter(i => !i.isNew && i.kitchenStatus !== 'NEW'));
+    } else {
+      this.cart.set([]);
+    }
   }
 
   formatPrice(price: number): string {
@@ -797,32 +1164,93 @@ export class PosComponent implements OnInit {
   }
 
   sendToKitchen(): void {
-    if (this.cart().length === 0) return;
+    const unsent = this.newItems();
+    if (unsent.length === 0) return;
     this.isSubmitting.set(true);
 
-    const req: CreateOrderRequest = {
-      tableId: this.selectedTable()?.id,
-      orderType: 'DINE_IN',
-      guestCount: 2,
-      notes: 'Oshxonaga yuborildi',
-      items: this.cart().map(item => ({
-        productId: item.product.id,
-        quantity: item.quantity
-      }))
-    };
+    if (!this.currentOrderId()) {
+      // First order on a free table
+      const req: CreateOrderRequest = {
+        tableId: this.selectedTable()?.id,
+        orderType: 'DINE_IN',
+        guestCount: 2,
+        notes: 'Oshxonaga yuborildi',
+        items: unsent.map(item => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          notes: item.notes
+        }))
+      };
 
-    this.orderService.createOrder(req).subscribe({
+      this.orderService.createOrder(req).subscribe({
+        next: (res) => {
+          this.isSubmitting.set(false);
+          if (res.success && res.data) {
+            this.currentOrderId.set(res.data.id);
+            this.updateCartFromOrder(res.data);
+            this.notify.success('Buyurtma oshxonaga yuborildi va stol band qilindi!');
+          }
+        },
+        error: (err) => {
+          this.isSubmitting.set(false);
+          this.notify.error(err.error?.message || 'Buyurtma yuborishda xatolik yuz berdi');
+        }
+      });
+    } else {
+      // Occupied table: send ONLY new items!
+      const itemsReq: CreateOrderItemRequest[] = unsent.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        notes: item.notes
+      }));
+
+      this.orderService.sendToKitchen(this.currentOrderId()!, itemsReq).subscribe({
+        next: (res) => {
+          this.isSubmitting.set(false);
+          if (res.success && res.data) {
+            this.updateCartFromOrder(res.data);
+            this.notify.success('Yangi mahsulotlar oshxonaga muvaffaqiyatli yuborildi!');
+          }
+        },
+        error: (err) => {
+          this.isSubmitting.set(false);
+          this.notify.error(err.error?.message || 'Oshxonaga yuborishda xatolik yuz berdi');
+        }
+      });
+    }
+  }
+
+  openCancelModal(item: PosCartItem): void {
+    this.cancellingItem = item;
+    this.cancelReason = 'Mijoz rad etdi';
+    this.cancelQty = item.quantity;
+    this.showCancelModal.set(true);
+  }
+
+  closeCancelModal(): void {
+    this.showCancelModal.set(false);
+    this.cancellingItem = null;
+  }
+
+  confirmCancelItem(): void {
+    if (!this.currentOrderId() || !this.cancellingItem?.id) return;
+    this.isSubmitting.set(true);
+
+    this.orderService.cancelItem(this.currentOrderId()!, this.cancellingItem.id, {
+      reason: this.cancelReason,
+      quantity: this.cancelQty
+    }).subscribe({
       next: (res) => {
         this.isSubmitting.set(false);
+        this.closeCancelModal();
         if (res.success && res.data) {
-          this.currentOrderId.set(res.data.id);
-          this.notify.success('Buyurtma oshxonaga yuborildi va stol band qilindi!');
-          this.router.navigate(['/tables']);
+          this.updateCartFromOrder(res.data.order);
+          this.notify.success('Mahsulot muvaffaqiyatli bekor qilindi');
         }
       },
       error: (err) => {
         this.isSubmitting.set(false);
-        this.notify.error(err.error?.message || 'Buyurtma yuborishda xatolik yuz berdi');
+        this.notify.error(err.error?.message || 'Bekor qilishda xatolik yuz berdi');
       }
     });
   }
@@ -837,7 +1265,7 @@ export class PosComponent implements OnInit {
   }
 
   submitPayment(): void {
-    if (this.cart().length === 0) return;
+    if (this.subtotal() === 0) return;
     this.isSubmitting.set(true);
 
     // If no order created yet, create order first then pay
@@ -846,8 +1274,8 @@ export class PosComponent implements OnInit {
         tableId: this.selectedTable()?.id,
         orderType: 'DINE_IN',
         guestCount: 2,
-        items: this.cart().map(item => ({
-          productId: item.product.id,
+        items: this.cart().filter(i => !i.voided).map(item => ({
+          productId: item.productId,
           quantity: item.quantity
         }))
       };

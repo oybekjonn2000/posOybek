@@ -83,6 +83,15 @@ public class OrderItem {
     @Column(name = "void_reason")
     private String voidReason;
 
+    @Column(name = "sent_quantity", nullable = false, precision = 10, scale = 3)
+    private BigDecimal sentQuantity = BigDecimal.ZERO;
+
+    @Column(name = "delivered_quantity", nullable = false, precision = 10, scale = 3)
+    private BigDecimal deliveredQuantity = BigDecimal.ZERO;
+
+    @Column(name = "cancelled_quantity", nullable = false, precision = 10, scale = 3)
+    private BigDecimal cancelledQuantity = BigDecimal.ZERO;
+
     @Column(name = "sort_order")
     private int sortOrder = 0;
 
@@ -125,6 +134,14 @@ public class OrderItem {
     }
 
     public enum KitchenStatus {
-        NEW, ACCEPTED, COOKING, READY, SERVED, CANCELLED
+        NEW,
+        SENT_TO_KITCHEN,
+        ACCEPTED,
+        PREPARING,
+        COOKING,
+        READY,
+        DELIVERED,
+        SERVED,
+        CANCELLED
     }
 }

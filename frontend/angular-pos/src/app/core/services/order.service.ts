@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ApiResponse } from './auth.service';
@@ -13,6 +13,11 @@ export interface OrderItem {
   unitPrice?: number;
   productPrice?: number;
   quantity: number;
+  sentQuantity?: number;
+  deliveredQuantity?: number;
+  cancelledQuantity?: number;
+  remainingToSend?: number;
+  isNew?: boolean;
   subtotal: number;
   notes?: string;
   kitchenStatus?: string;
@@ -33,6 +38,9 @@ export interface Order {
   tableName?: string;
   waiterId?: string;
   waiterName?: string;
+  cashierId?: string;
+  cashierName?: string;
+  paymentMethod?: string;
   guestCount?: number;
   subtotal: number;
   taxAmount?: number;
@@ -42,6 +50,7 @@ export interface Order {
   total: number;
   totalAmount?: number;
   paidAmount?: number;
+  changeAmount?: number;
   notes?: string;
   kitchenNotes?: string;
   openedAt?: string;
@@ -49,6 +58,7 @@ export interface Order {
   sentToKitchenAt?: string;
   readyAt?: string;
   paidAt?: string;
+  closedAt?: string;
   items: OrderItem[];
 }
 
@@ -113,6 +123,14 @@ export class OrderService {
     return this.http.get<ApiResponse<Order[]>>(this.API);
   }
 
+  getOrderHistory(params?: { tableId?: string; paymentMethod?: string; search?: string }): Observable<ApiResponse<Order[]>> {
+    let httpParams = new HttpParams();
+    if (params?.tableId) httpParams = httpParams.set('tableId', params.tableId);
+    if (params?.paymentMethod && params.paymentMethod !== 'ALL') httpParams = httpParams.set('paymentMethod', params.paymentMethod);
+    if (params?.search) httpParams = httpParams.set('search', params.search);
+    return this.http.get<ApiResponse<Order[]>>(`${this.API}/history`, { params: httpParams });
+  }
+
   getOrderById(id: string): Observable<ApiResponse<Order>> {
     return this.http.get<ApiResponse<Order>>(`${this.API}/${id}`);
   }
@@ -123,6 +141,11 @@ export class OrderService {
 
   addItems(orderId: string, request: AddItemsRequest): Observable<ApiResponse<Order>> {
     return this.http.post<ApiResponse<Order>>(`${this.API}/${orderId}/items`, request);
+  }
+
+  sendToKitchen(orderId: string, items?: CreateOrderItemRequest[]): Observable<ApiResponse<Order>> {
+    const body = items && items.length > 0 ? { items } : {};
+    return this.http.post<ApiResponse<Order>>(`${this.API}/${orderId}/send-to-kitchen`, body);
   }
 
   voidItem(orderId: string, itemId: string, reason: string): Observable<ApiResponse<Order>> {

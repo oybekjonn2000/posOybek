@@ -1,10 +1,11 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { TableService, RestaurantTable, TableZone, CreateTableRequest } from '../core/services/table.service';
 import { NotificationService } from '../core/services/notification.service';
 import { AuthService } from '../core/services/auth.service';
+import { WebsocketService } from '../core/services/websocket.service';
 
 @Component({
   selector: 'app-tables',
@@ -107,9 +108,21 @@ import { AuthService } from '../core/services/auth.service';
                   {{ table.status === 'FREE' ? '🟢' : '🔴' }}
                 </div>
                 <div class="table-card__name">{{ table.name }}</div>
-                <div class="table-card__capacity">
-                  <span>👥 {{ table.capacity }} kishilik</span>
-                </div>
+
+                @if (table.status === 'FREE') {
+                  <div class="table-card__capacity">
+                    <span>👥 {{ table.capacity }} kishilik</span>
+                  </div>
+                } @else {
+                  <div class="table-card__active-order">
+                    <div class="table-card__item-count">
+                      🍽️ {{ table.itemCount || 0 }} ta mahsulot
+                    </div>
+                    <div class="table-card__amount">
+                      {{ formatPrice(table.totalAmount || 0) }}
+                    </div>
+                  </div>
+                }
               </div>
 
               <div class="table-card__footer">
@@ -119,7 +132,7 @@ import { AuthService } from '../core/services/auth.service';
                   </button>
                 } @else {
                   <button class="btn-action btn-action--view">
-                    👀 Buyurtmani ko'rish
+                    👀 OCHISH
                   </button>
                 }
               </div>
@@ -389,6 +402,31 @@ import { AuthService } from '../core/services/auth.service';
         color: var(--text-muted);
       }
 
+      &__active-order {
+        margin-top: 8px;
+        padding: 8px 12px;
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px dashed rgba(239, 68, 68, 0.4);
+        border-radius: var(--radius-md);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+      }
+
+      &__item-count {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      &__amount {
+        font-size: 16px;
+        font-weight: 800;
+        color: #ef4444;
+        letter-spacing: 0.3px;
+      }
+
       &__footer {
         margin-top: 12px;
         padding-top: 12px;
@@ -603,7 +641,7 @@ import { AuthService } from '../core/services/auth.service';
     @keyframes spin { to { transform: rotate(360deg); } }
   `]
 })
-export class TablesComponent implements OnInit {
+export class TablesComponent implements OnInit, OnDestroy {
   tables = signal<RestaurantTable[]>([]);
   zones = signal<TableZone[]>([]);
   selectedZoneId = signal<string | null>(null);
@@ -611,6 +649,7 @@ export class TablesComponent implements OnInit {
   showAddModal = signal(false);
   showCustomZone = signal(false);
   customZoneName = '';
+  private wsUnsub?: () => void;
 
   newTable: CreateTableRequest = {
     zoneId: '',
@@ -632,11 +671,46 @@ export class TablesComponent implements OnInit {
     private tableService: TableService,
     private router: Router,
     private notify: NotificationService,
-    public auth: AuthService
+    public auth: AuthService,
+    private wsService: WebsocketService
   ) {}
 
   ngOnInit(): void {
     this.loadAll();
+    this.setupWebSocket();
+  }
+
+  ngOnDestroy(): void {
+    if (this.wsUnsub) {
+      this.wsUnsub();
+    }
+  }
+
+  private setupWebSocket(): void {
+    const user = this.auth.user();
+    if (user?.tenantId) {
+      this.wsUnsub = this.wsService.subscribe<RestaurantTable>(
+        `/topic/tables/${user.tenantId}`,
+        (updatedTable) => {
+          if (updatedTable && updatedTable.id) {
+            this.tables.update(list => {
+              const idx = list.findIndex(t => t.id === updatedTable.id);
+              if (idx >= 0) {
+                const next = [...list];
+                next[idx] = { ...next[idx], ...updatedTable };
+                return next;
+              }
+              return list;
+            });
+          }
+        }
+      );
+    }
+  }
+
+  formatPrice(val?: number): string {
+    if (!val) return '0 so‘m';
+    return val.toLocaleString('uz-UZ') + ' so‘m';
   }
 
   loadAll(): void {

@@ -43,6 +43,11 @@ public class OrderDto {
         private Instant readyAt;
         private Instant paidAt;
         private Instant closedAt;
+        private UUID cashierId;
+        private String cashierName;
+        private String paymentMethod;
+        private BigDecimal paidAmount;
+        private BigDecimal changeAmount;
         private List<ItemResponse> items;
         private int version;
     }
@@ -64,6 +69,10 @@ public class OrderDto {
         private BigDecimal subtotal;
         private String notes;
         private String kitchenStatus;
+        private BigDecimal sentQuantity;
+        private BigDecimal deliveredQuantity;
+        private BigDecimal cancelledQuantity;
+        private BigDecimal remainingToSend;
         private boolean voided;
         private String voidReason;
         private java.time.Instant voidedAt;
@@ -122,6 +131,13 @@ public class OrderDto {
     @AllArgsConstructor
     public static class AddItemsRequest {
         @NotEmpty(message = "Items list cannot be empty")
+        private List<ItemRequest> items;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SendToKitchenRequest {
         private List<ItemRequest> items;
     }
 

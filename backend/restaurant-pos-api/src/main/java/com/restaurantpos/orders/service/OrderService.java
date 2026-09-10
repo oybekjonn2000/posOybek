@@ -24,6 +24,9 @@ import com.restaurantpos.tenants.entity.Tenant;
 import com.restaurantpos.tenants.repository.TenantRepository;
 import com.restaurantpos.users.entity.User;
 import com.restaurantpos.users.repository.UserRepository;
+import com.restaurantpos.payments.entity.Payment;
+import com.restaurantpos.payments.repository.PaymentRepository;
+import com.restaurantpos.tables.dto.TableDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +53,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CancellationReceiptRepository cancellationReceiptRepository;
+    private final PaymentRepository paymentRepository;
     private final ProductRepository productRepository;
     private final ModifierRepository modifierRepository;
     private final RestaurantTableRepository tableRepository;
@@ -68,6 +72,70 @@ public class OrderService {
         return orderRepository.findActiveOrders(tenantId).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderDto.Response> getOrderHistory(UUID tenantId, UUID tableId, String paymentMethod, String search) {
+        List<Order> orders = orderRepository.findHistoryOrders(tenantId);
+        return orders.stream()
+                .filter(o -> {
+                    if (tableId != null && (o.getTable() == null || !tableId.equals(o.getTable().getId()))) {
+                        return false;
+                    }
+                    if (search != null && !search.trim().isBlank()) {
+                        String q = search.trim().toLowerCase();
+                        boolean matchNum = o.getOrderNumber() != null && o.getOrderNumber().toLowerCase().contains(q);
+                        boolean matchTbl = o.getTable() != null && o.getTable().getName() != null && o.getTable().getName().toLowerCase().contains(q);
+                        boolean matchWaiter = o.getWaiter() != null && (o.getWaiter().getFirstName() + " " + (o.getWaiter().getLastName() != null ? o.getWaiter().getLastName() : "")).toLowerCase().contains(q);
+                        if (!matchNum && !matchTbl && !matchWaiter) return false;
+                    }
+                    return true;
+                })
+                .map(this::toResponse)
+                .filter(res -> {
+                    if (paymentMethod != null && !paymentMethod.trim().isBlank() && !"ALL".equalsIgnoreCase(paymentMethod)) {
+                        return paymentMethod.equalsIgnoreCase(res.getPaymentMethod());
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+    }
+
+    public TableDto.Response toTableResponse(RestaurantTable table, Order activeOrder) {
+        String activeOrderNumber = null;
+        Integer itemCount = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
+
+        if (activeOrder != null && activeOrder.getStatus() != Order.OrderStatus.PAID && activeOrder.getStatus() != Order.OrderStatus.CANCELLED) {
+            activeOrderNumber = activeOrder.getOrderNumber();
+            itemCount = activeOrder.getItems() != null
+                    ? activeOrder.getItems().stream()
+                        .filter(i -> !i.isVoided())
+                        .mapToInt(i -> i.getQuantity().intValue())
+                        .sum()
+                    : 0;
+            totalAmount = activeOrder.getTotal() != null ? activeOrder.getTotal() : (activeOrder.getSubtotal() != null ? activeOrder.getSubtotal() : BigDecimal.ZERO);
+        }
+
+        return TableDto.Response.builder()
+                .id(table.getId())
+                .zoneId(table.getZone() != null ? table.getZone().getId() : null)
+                .zoneName(table.getZone() != null ? table.getZone().getName() : null)
+                .tableNumber(table.getTableNumber())
+                .name(table.getName())
+                .capacity(table.getCapacity())
+                .shape(table.getShape())
+                .posX(table.getPosX())
+                .posY(table.getPosY())
+                .width(table.getWidth())
+                .height(table.getHeight())
+                .status(table.getStatus() != null ? table.getStatus().name() : "FREE")
+                .currentOrderId(table.getCurrentOrderId())
+                .activeOrderNumber(activeOrderNumber)
+                .itemCount(itemCount)
+                .totalAmount(totalAmount)
+                .active(table.isActive())
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -132,6 +200,9 @@ public class OrderService {
 
         routeOrderToKitchens(saved, tenant);
         saved = orderRepository.save(saved);
+        if (table != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(table, saved));
+        }
         return toResponse(saved);
     }
 
@@ -151,8 +222,10 @@ public class OrderService {
 
         order.recalculateTotals();
         Order saved = orderRepository.save(order);
-        routeOrderToKitchens(saved, order.getTenant());
-        saved = orderRepository.save(saved);
+        wsNotification.notifyOrderStatusChanged(tenantId, toResponse(saved));
+        if (saved.getTable() != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(saved.getTable(), saved));
+        }
         return toResponse(saved);
     }
 
@@ -175,6 +248,9 @@ public class OrderService {
 
         order.recalculateTotals();
         Order saved = orderRepository.save(order);
+        if (saved.getTable() != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(saved.getTable(), saved));
+        }
         return toResponse(saved);
     }
 
@@ -192,6 +268,9 @@ public class OrderService {
 
         order.recalculateTotals();
         Order saved = orderRepository.save(order);
+        if (saved.getTable() != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(saved.getTable(), saved));
+        }
         return toResponse(saved);
     }
 
@@ -278,6 +357,26 @@ public class OrderService {
                     .collect(Collectors.toList());
         }
 
+        UUID cashierId = order.getCashier() != null ? order.getCashier().getId() : null;
+        String cashierName = order.getCashier() != null ? order.getCashier().getFirstName() + " " + (order.getCashier().getLastName() != null ? order.getCashier().getLastName() : "") : null;
+        String paymentMethod = null;
+        BigDecimal paidAmount = null;
+        BigDecimal changeAmount = null;
+
+        if (order.getStatus() == Order.OrderStatus.PAID) {
+            List<Payment> payments = paymentRepository.findByOrderId(order.getId());
+            if (!payments.isEmpty()) {
+                Payment p = payments.get(0);
+                paymentMethod = p.getPaymentMethod() != null ? p.getPaymentMethod().name() : null;
+                paidAmount = p.getAmount();
+                changeAmount = p.getChangeAmount();
+                if (cashierId == null && p.getCashier() != null) {
+                    cashierId = p.getCashier().getId();
+                    cashierName = p.getCashier().getFirstName() + " " + (p.getCashier().getLastName() != null ? p.getCashier().getLastName() : "");
+                }
+            }
+        }
+
         return OrderDto.Response.builder()
                 .id(order.getId())
                 .orderNumber(order.getOrderNumber())
@@ -302,9 +401,90 @@ public class OrderService {
                 .readyAt(order.getReadyAt())
                 .paidAt(order.getPaidAt())
                 .closedAt(order.getClosedAt())
+                .cashierId(cashierId)
+                .cashierName(cashierName)
+                .paymentMethod(paymentMethod)
+                .paidAmount(paidAmount)
+                .changeAmount(changeAmount)
                 .items(items)
                 .version(order.getVersion())
                 .build();
+    }
+
+    @Transactional
+    public OrderDto.Response sendNewItemsToKitchen(UUID orderId, UUID tenantId, OrderDto.SendToKitchenRequest request) {
+        Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+
+        if (order.getStatus() == Order.OrderStatus.PAID || order.getStatus() == Order.OrderStatus.CANCELLED) {
+            throw PosException.badRequest("Cannot send items for " + order.getStatus() + " order");
+        }
+
+        // 1. If request has new items, build and add them with status NEW
+        if (request != null && request.getItems() != null && !request.getItems().isEmpty()) {
+            for (OrderDto.ItemRequest itemReq : request.getItems()) {
+                OrderItem item = buildOrderItem(order, itemReq, tenantId);
+                order.getItems().add(item);
+            }
+            order.recalculateTotals();
+        }
+
+        // 2. Filter strictly for items that need to be sent:
+        // status == NEW, not voided, quantity > 0
+        List<OrderItem> itemsToSend = order.getItems().stream()
+                .filter(i -> !i.isVoided() && i.getKitchenStatus() == OrderItem.KitchenStatus.NEW && i.getKitchen() != null)
+                .collect(Collectors.toList());
+
+        if (itemsToSend.isEmpty()) {
+            throw PosException.badRequest("Oshxonaga yuborish uchun yangi mahsulotlar yo'q");
+        }
+
+        // 3. Group by kitchen
+        java.util.Map<com.restaurantpos.kitchen.entity.Kitchen, List<OrderItem>> itemsByKitchen = itemsToSend.stream()
+                .collect(Collectors.groupingBy(OrderItem::getKitchen));
+
+        Instant now = Instant.now();
+
+        for (java.util.Map.Entry<com.restaurantpos.kitchen.entity.Kitchen, List<OrderItem>> entry : itemsByKitchen.entrySet()) {
+            com.restaurantpos.kitchen.entity.Kitchen kitchen = entry.getKey();
+            List<OrderItem> kitchenItems = entry.getValue();
+
+            com.restaurantpos.kitchen.entity.KitchenTicket ticket = new com.restaurantpos.kitchen.entity.KitchenTicket();
+            ticket.setTenant(order.getTenant());
+            ticket.setOrder(order);
+            ticket.setKitchen(kitchen);
+            ticket.setTicketNumber(order.getOrderNumber() + "-" + kitchen.getCode() + "-" + String.format("%03d", System.currentTimeMillis() % 1000));
+            ticket.setStatus(com.restaurantpos.kitchen.entity.KitchenTicket.TicketStatus.NEW);
+            ticket.setNotes(order.getKitchenNotes() != null ? order.getKitchenNotes() : order.getNotes());
+            kitchenTicketRepository.save(ticket);
+
+            // Targeted WebSocket notification: ONLY newly sent items for this specific kitchen
+            OrderDto.Response kitchenPayload = buildKitchenOrderPayload(order, kitchen.getId(), kitchenItems);
+            wsNotification.notifyKitchenNewTicket(kitchen.getId(), kitchenPayload);
+        }
+
+        // 4. Transition newly sent items: NEW -> SENT_TO_KITCHEN
+        for (OrderItem item : itemsToSend) {
+            item.setKitchenStatus(OrderItem.KitchenStatus.SENT_TO_KITCHEN);
+            item.setSentToKitchenAt(now);
+            item.setSentQuantity(item.getQuantity());
+        }
+
+        // 5. Update order status
+        order.setStatus(Order.OrderStatus.IN_PROGRESS);
+        if (order.getSentToKitchenAt() == null) {
+            order.setSentToKitchenAt(now);
+        }
+
+        Order saved = orderRepository.save(order);
+
+        // 6. Notify POS / orders channel
+        wsNotification.notifyOrderStatusChanged(tenantId, toResponse(saved));
+        if (saved.getTable() != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(saved.getTable(), saved));
+        }
+
+        return toResponse(saved);
     }
 
     private void routeOrderToKitchens(Order order, Tenant tenant) {
@@ -312,14 +492,23 @@ public class OrderService {
             return;
         }
 
+        // Filter strictly ONLY NEW and non-voided items!
+        List<OrderItem> newItems = order.getItems().stream()
+                .filter(i -> !i.isVoided() && i.getKitchenStatus() == OrderItem.KitchenStatus.NEW && i.getKitchen() != null)
+                .collect(Collectors.toList());
+
+        if (newItems.isEmpty()) {
+            return;
+        }
+
         order.setStatus(Order.OrderStatus.IN_PROGRESS);
+        Instant now = Instant.now();
         if (order.getSentToKitchenAt() == null) {
-            order.setSentToKitchenAt(Instant.now());
+            order.setSentToKitchenAt(now);
         }
 
         // Group items by kitchen
-        java.util.Map<com.restaurantpos.kitchen.entity.Kitchen, List<OrderItem>> itemsByKitchen = order.getItems().stream()
-                .filter(i -> !i.isVoided() && i.getKitchen() != null)
+        java.util.Map<com.restaurantpos.kitchen.entity.Kitchen, List<OrderItem>> itemsByKitchen = newItems.stream()
                 .collect(Collectors.groupingBy(OrderItem::getKitchen));
 
         for (java.util.Map.Entry<com.restaurantpos.kitchen.entity.Kitchen, List<OrderItem>> entry : itemsByKitchen.entrySet()) {
@@ -330,14 +519,21 @@ public class OrderService {
             ticket.setTenant(tenant);
             ticket.setOrder(order);
             ticket.setKitchen(kitchen);
-            ticket.setTicketNumber(order.getOrderNumber() + "-" + kitchen.getCode());
+            ticket.setTicketNumber(order.getOrderNumber() + "-" + kitchen.getCode() + "-" + String.format("%03d", System.currentTimeMillis() % 1000));
             ticket.setStatus(com.restaurantpos.kitchen.entity.KitchenTicket.TicketStatus.NEW);
             ticket.setNotes(order.getKitchenNotes() != null ? order.getKitchenNotes() : order.getNotes());
             kitchenTicketRepository.save(ticket);
 
-            // WebSocket event: Har bir oshxona kanaliga (/topic/kitchen/{kitchenId}) FAQAT o'zining taomlari yuboriladi!
+            // WebSocket event: Har bir oshxona kanaliga (/topic/kitchen/{kitchenId}) FAQAT YANGI taomlar yuboriladi!
             OrderDto.Response kitchenPayload = buildKitchenOrderPayload(order, kitchen.getId(), kitchenItems);
             wsNotification.notifyKitchenNewTicket(kitchen.getId(), kitchenPayload);
+        }
+
+        // Mark routed items as SENT_TO_KITCHEN
+        for (OrderItem item : newItems) {
+            item.setKitchenStatus(OrderItem.KitchenStatus.SENT_TO_KITCHEN);
+            item.setSentToKitchenAt(now);
+            item.setSentQuantity(item.getQuantity());
         }
 
         // Umumiy KDS kanaliga xabar
@@ -375,6 +571,11 @@ public class OrderService {
                     .build()
             ).collect(Collectors.toList());
         }
+
+        BigDecimal remaining = (i.getQuantity() != null && i.getSentQuantity() != null)
+                ? i.getQuantity().subtract(i.getSentQuantity()).max(BigDecimal.ZERO)
+                : (i.getKitchenStatus() == OrderItem.KitchenStatus.NEW ? i.getQuantity() : BigDecimal.ZERO);
+
         return OrderDto.ItemResponse.builder()
                 .id(i.getId())
                 .productId(i.getProduct() != null ? i.getProduct().getId() : null)
@@ -388,6 +589,10 @@ public class OrderService {
                 .subtotal(i.getSubtotal())
                 .notes(i.getNotes())
                 .kitchenStatus(i.getKitchenStatus() != null ? i.getKitchenStatus().name() : null)
+                .sentQuantity(i.getSentQuantity() != null ? i.getSentQuantity() : BigDecimal.ZERO)
+                .deliveredQuantity(i.getDeliveredQuantity() != null ? i.getDeliveredQuantity() : BigDecimal.ZERO)
+                .cancelledQuantity(i.getCancelledQuantity() != null ? i.getCancelledQuantity() : BigDecimal.ZERO)
+                .remainingToSend(remaining)
                 .voided(i.isVoided())
                 .voidReason(i.getVoidReason())
                 .voidedAt(i.getVoidedAt())
@@ -448,6 +653,7 @@ public class OrderService {
             voidedPortion.calculateSubtotal();
             voidedPortion.setVoided(true);
             voidedPortion.setKitchenStatus(OrderItem.KitchenStatus.CANCELLED);
+            voidedPortion.setCancelledQuantity(cancelQty);
             voidedPortion.setVoidReason(reason);
             voidedPortion.setVoidedAt(Instant.now());
             voidedPortion.setVoidedBy(user);
@@ -461,6 +667,7 @@ public class OrderService {
 
             item.setVoided(true);
             item.setKitchenStatus(OrderItem.KitchenStatus.CANCELLED);
+            item.setCancelledQuantity(cancelQty);
             item.setVoidReason(reason);
             item.setVoidedAt(Instant.now());
             item.setVoidedBy(user);
@@ -484,10 +691,17 @@ public class OrderService {
         }
 
         Order saved = orderRepository.save(order);
+        if (order.getTable() != null) {
+            if (allVoided) {
+                wsNotification.notifyTableUpdated(tenantId, toTableResponse(order.getTable(), null));
+            } else {
+                wsNotification.notifyTableUpdated(tenantId, toTableResponse(order.getTable(), saved));
+            }
+        }
 
         // Generate Cancellation Receipt in database
         String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
-        String receiptNumber = "CAN-" + dateStr + "-" + String.format("%04d", CANCEL_COUNTER.incrementAndGet() % 10000);
+        String receiptNumber = "CAN-" + dateStr + "-" + String.format("%04d", CANCEL_COUNTER.incrementAndGet() % 10000) + "-" + String.format("%03d", System.currentTimeMillis() % 1000);
 
         CancellationReceipt receipt = new CancellationReceipt();
         receipt.setTenant(order.getTenant());
@@ -587,10 +801,13 @@ public class OrderService {
         }
 
         Order saved = orderRepository.save(order);
+        if (order.getTable() != null) {
+            wsNotification.notifyTableUpdated(tenantId, toTableResponse(order.getTable(), null));
+        }
 
         // Generate Cancellation Receipt for full order
         String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
-        String receiptNumber = "CAN-" + dateStr + "-" + String.format("%04d", CANCEL_COUNTER.incrementAndGet() % 10000);
+        String receiptNumber = "CAN-" + dateStr + "-" + String.format("%04d", CANCEL_COUNTER.incrementAndGet() % 10000) + "-" + String.format("%03d", System.currentTimeMillis() % 1000);
 
         CancellationReceipt receipt = new CancellationReceipt();
         receipt.setTenant(order.getTenant());

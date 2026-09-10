@@ -1,6 +1,9 @@
 package com.restaurantpos.tables.service;
 
 import com.restaurantpos.common.exception.PosException;
+import com.restaurantpos.common.websocket.WebSocketNotificationService;
+import com.restaurantpos.orders.entity.Order;
+import com.restaurantpos.orders.repository.OrderRepository;
 import com.restaurantpos.tables.dto.TableDto;
 import com.restaurantpos.tables.entity.RestaurantTable;
 import com.restaurantpos.tables.entity.TableZone;
@@ -12,7 +15,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -23,6 +29,8 @@ public class TableService {
     private final RestaurantTableRepository tableRepository;
     private final TableZoneRepository zoneRepository;
     private final TenantRepository tenantRepository;
+    private final OrderRepository orderRepository;
+    private final WebSocketNotificationService wsNotification;
 
     @Transactional(readOnly = true)
     public List<TableDto.ZoneResponse> getZones(UUID tenantId) {
@@ -71,14 +79,33 @@ public class TableService {
                 ? tableRepository.findByTenantIdAndZoneIdAndDeletedAtIsNullOrderByTableNumberAsc(tenantId, zoneId)
                 : tableRepository.findByTenantIdAndDeletedAtIsNullOrderByTableNumberAsc(tenantId);
 
-        return tables.stream().map(this::toResponse).collect(Collectors.toList());
+        List<UUID> orderIds = tables.stream()
+                .map(RestaurantTable::getCurrentOrderId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<UUID, Order> ordersMap = java.util.Collections.emptyMap();
+        if (!orderIds.isEmpty()) {
+            ordersMap = orderRepository.findAllById(orderIds).stream()
+                    .collect(Collectors.toMap(Order::getId, o -> o));
+        }
+
+        Map<UUID, Order> finalOrdersMap = ordersMap;
+        return tables.stream()
+                .map(t -> {
+                    Order order = t.getCurrentOrderId() != null ? finalOrdersMap.get(t.getCurrentOrderId()) : null;
+                    return toResponse(t, order);
+                })
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public TableDto.Response getTableById(UUID id, UUID tenantId) {
         RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Table not found: " + id));
-        return toResponse(table);
+        Order order = table.getCurrentOrderId() != null ? orderRepository.findById(table.getCurrentOrderId()).orElse(null) : null;
+        return toResponse(table, order);
     }
 
     @Transactional
@@ -90,7 +117,10 @@ public class TableService {
         table.setCurrentOrderId(request.getCurrentOrderId());
 
         RestaurantTable saved = tableRepository.save(table);
-        return toResponse(saved);
+        Order order = saved.getCurrentOrderId() != null ? orderRepository.findById(saved.getCurrentOrderId()).orElse(null) : null;
+        TableDto.Response res = toResponse(saved, order);
+        wsNotification.notifyTableUpdated(tenantId, res);
+        return res;
     }
 
     @Transactional
@@ -189,7 +219,22 @@ public class TableService {
         tableRepository.save(table);
     }
 
-    private TableDto.Response toResponse(RestaurantTable table) {
+    public TableDto.Response toResponse(RestaurantTable table, Order activeOrder) {
+        String activeOrderNumber = null;
+        Integer itemCount = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
+
+        if (activeOrder != null && activeOrder.getStatus() != Order.OrderStatus.PAID && activeOrder.getStatus() != Order.OrderStatus.CANCELLED) {
+            activeOrderNumber = activeOrder.getOrderNumber();
+            itemCount = activeOrder.getItems() != null
+                    ? activeOrder.getItems().stream()
+                        .filter(i -> !i.isVoided())
+                        .mapToInt(i -> i.getQuantity().intValue())
+                        .sum()
+                    : 0;
+            totalAmount = activeOrder.getTotal() != null ? activeOrder.getTotal() : (activeOrder.getSubtotal() != null ? activeOrder.getSubtotal() : BigDecimal.ZERO);
+        }
+
         return TableDto.Response.builder()
                 .id(table.getId())
                 .zoneId(table.getZone() != null ? table.getZone().getId() : null)
@@ -204,7 +249,15 @@ public class TableService {
                 .height(table.getHeight())
                 .status(table.getStatus() != null ? table.getStatus().name() : "FREE")
                 .currentOrderId(table.getCurrentOrderId())
+                .activeOrderNumber(activeOrderNumber)
+                .itemCount(itemCount)
+                .totalAmount(totalAmount)
                 .active(table.isActive())
                 .build();
+    }
+
+    public TableDto.Response toResponse(RestaurantTable table) {
+        Order order = table.getCurrentOrderId() != null ? orderRepository.findById(table.getCurrentOrderId()).orElse(null) : null;
+        return toResponse(table, order);
     }
 }

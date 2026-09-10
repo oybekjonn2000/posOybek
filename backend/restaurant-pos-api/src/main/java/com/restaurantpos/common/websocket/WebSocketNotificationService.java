@@ -82,6 +82,13 @@ public class WebSocketNotificationService {
         log.debug("WS: table status changed {} -> {} ({})", tableId, destination, status);
     }
 
+    /** Stol to'liq ma'lumoti yangilandi (summa, taomlar soni, status) */
+    public void notifyTableUpdated(UUID tenantId, Object tablePayload) {
+        String destination = "/topic/tables/" + tenantId;
+        messagingTemplate.convertAndSend(destination, new WebSocketEvent("TABLE_UPDATED", tablePayload));
+        log.debug("WS: table updated -> {}", destination);
+    }
+
     // -------------------------------------------------------
 
     public record WebSocketEvent(String type, Object payload) {

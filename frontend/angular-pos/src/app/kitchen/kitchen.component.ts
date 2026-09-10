@@ -164,7 +164,7 @@ import { Order, OrderItem } from '../core/services/order.service';
               *ngFor="let item of order.items"
               class="kds-item-row"
               [class.item-ready]="item.kitchenStatus === 'READY'"
-              [class.item-cooking]="item.kitchenStatus === 'COOKING'"
+              [class.item-cooking]="item.kitchenStatus === 'COOKING' || item.kitchenStatus === 'PREPARING'"
               [class.item-cancelled]="item.kitchenStatus === 'CANCELLED' || item.voided">
               
               <div class="item-details">
@@ -193,14 +193,14 @@ import { Order, OrderItem } from '../core/services/order.service';
               <!-- Item Actions: only visible for active non-voided items -->
               <div class="item-actions" *ngIf="!item.voided && item.kitchenStatus !== 'CANCELLED'">
                 <button
-                  *ngIf="item.kitchenStatus === 'NEW' || !item.kitchenStatus"
+                  *ngIf="item.kitchenStatus === 'NEW' || item.kitchenStatus === 'SENT_TO_KITCHEN' || !item.kitchenStatus"
                   class="action-btn action-btn--cook"
                   (click)="setItemStatus(item, 'COOKING')">
                   🔥 Tayyorlash
                 </button>
 
                 <button
-                  *ngIf="item.kitchenStatus === 'COOKING'"
+                  *ngIf="item.kitchenStatus === 'COOKING' || item.kitchenStatus === 'PREPARING'"
                   class="action-btn action-btn--ready"
                   (click)="setItemStatus(item, 'READY')">
                   ✅ Tayyor bo'ldi
@@ -213,7 +213,7 @@ import { Order, OrderItem } from '../core/services/order.service';
                   🍽️ Tarqatildi
                 </button>
 
-                <span *ngIf="item.kitchenStatus === 'SERVED'" class="badge-served">
+                <span *ngIf="item.kitchenStatus === 'SERVED' || item.kitchenStatus === 'DELIVERED'" class="badge-served">
                   ✓ Yetkazildi
                 </span>
               </div>
@@ -1121,13 +1121,25 @@ export class KitchenComponent implements OnInit, OnDestroy {
   get filteredOrders(): Order[] {
     if (this.currentFilter === 'ALL') return this.orders;
     return this.orders.filter(order =>
-      order.items?.some(item => (item.kitchenStatus || 'NEW') === this.currentFilter)
+      order.items?.some(item => {
+        if (item.voided) return false;
+        const st = item.kitchenStatus || 'NEW';
+        if (this.currentFilter === 'NEW') return st === 'NEW' || st === 'SENT_TO_KITCHEN';
+        if (this.currentFilter === 'COOKING') return st === 'COOKING' || st === 'PREPARING';
+        return st === this.currentFilter;
+      })
     );
   }
 
   countByStatus(status: string): number {
     return this.orders.filter(order =>
-      order.items?.some(item => (item.kitchenStatus || 'NEW') === status)
+      order.items?.some(item => {
+        if (item.voided) return false;
+        const st = item.kitchenStatus || 'NEW';
+        if (status === 'NEW') return st === 'NEW' || st === 'SENT_TO_KITCHEN';
+        if (status === 'COOKING') return st === 'COOKING' || st === 'PREPARING';
+        return st === status;
+      })
     ).length;
   }
 
@@ -1144,11 +1156,15 @@ export class KitchenComponent implements OnInit, OnDestroy {
 
   getStatusText(status?: string): string {
     switch (status) {
-      case 'NEW': return 'Yangi';
-      case 'COOKING': return 'Olovda';
-      case 'READY': return 'Tayyor';
-      case 'SERVED': return 'Yetkazildi';
-      case 'CANCELLED': return 'Bekor qilindi';
+      case 'NEW': return '🟡 Yangi';
+      case 'SENT_TO_KITCHEN': return '🔵 Yuborilgan';
+      case 'ACCEPTED': return '🟣 Qabul qilindi';
+      case 'PREPARING':
+      case 'COOKING': return '🟠 Tayyorlanmoqda';
+      case 'READY': return '🟢 Tayyor';
+      case 'DELIVERED':
+      case 'SERVED': return '✅ Yetkazilgan';
+      case 'CANCELLED': return '🔴 Bekor qilindi';
       default: return status || 'Yangi';
     }
   }
@@ -1179,9 +1195,9 @@ export class KitchenComponent implements OnInit, OnDestroy {
     return `${mins} daq`;
   }
 
-  setItemStatus(item: OrderItem, status: 'NEW' | 'ACCEPTED' | 'COOKING' | 'READY' | 'SERVED'): void {
+  setItemStatus(item: OrderItem, status: 'NEW' | 'ACCEPTED' | 'COOKING' | 'PREPARING' | 'READY' | 'SERVED' | 'DELIVERED'): void {
     if (!item.id) return;
-    this.kitchenService.updateItemStatus(item.id, status).subscribe({
+    this.kitchenService.updateItemStatus(item.id, status as any).subscribe({
       next: () => {
         item.kitchenStatus = status;
         this.orders = [...this.orders];

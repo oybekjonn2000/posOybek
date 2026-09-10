@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { OrderService, Order, OrderItem, CancellationReceipt } from '../../core/services/order.service';
 import { PaymentService, PaymentProcessRequest } from '../../core/services/payment.service';
-import { TableService } from '../../core/services/table.service';
+import { TableService, RestaurantTable } from '../../core/services/table.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -47,44 +47,75 @@ import { TableService } from '../../core/services/table.service';
           <button
             class="tab-btn"
             [class.active]="activeTab === 'ALL'"
-            (click)="activeTab = 'ALL'">
+            (click)="setTab('ALL')">
             Barchasi ({{ orders.length }})
           </button>
           <button
             class="tab-btn"
             [class.active]="activeTab === 'ACTIVE'"
-            (click)="activeTab = 'ACTIVE'">
+            (click)="setTab('ACTIVE')">
             Faol ({{ activeOrdersCount }})
           </button>
           <button
             class="tab-btn"
             [class.active]="activeTab === 'KITCHEN'"
-            (click)="activeTab = 'KITCHEN'">
+            (click)="setTab('KITCHEN')">
             Oshxonada ({{ kitchenOrdersCount }})
           </button>
           <button
             class="tab-btn"
             [class.active]="activeTab === 'READY'"
-            (click)="activeTab = 'READY'">
+            (click)="setTab('READY')">
             Tayyor ({{ readyOrdersCount }})
           </button>
           <button
             class="tab-btn"
             [class.active]="activeTab === 'PAID'"
-            (click)="activeTab = 'PAID'">
-            To'langan ({{ paidOrdersCount }})
+            (click)="setTab('PAID')">
+            📁 Buyurtma Tarixi ({{ paidOrdersCount }})
           </button>
         </div>
 
         <div class="revenue-pill" *ngIf="todayTotalRevenue > 0">
-          <span>Jami tushum:</span>
+          <span>Bugungi tushum:</span>
           <strong>{{ todayTotalRevenue | number:'1.0-0' }} so'm</strong>
+        </div>
+      </div>
+
+      <!-- History Filter Bar (Only shown on PAID / Tarix tab) -->
+      <div *ngIf="activeTab === 'PAID'" class="history-filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">📅 Sana:</span>
+          <div class="pill-group">
+            <button class="pill-btn" [class.active]="dateFilter === 'ALL'" (click)="dateFilter = 'ALL'">Barchasi</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'TODAY'" (click)="dateFilter = 'TODAY'">Bugun</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'YESTERDAY'" (click)="dateFilter = 'YESTERDAY'">Kecha</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'THIS_WEEK'" (click)="dateFilter = 'THIS_WEEK'">Shu hafta</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'THIS_MONTH'" (click)="dateFilter = 'THIS_MONTH'">Shu oy</button>
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">💳 To'lov turi:</span>
+          <div class="pill-group">
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'ALL'" (click)="paymentMethodFilter = 'ALL'">Barchasi</button>
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CASH'" (click)="paymentMethodFilter = 'CASH'">💵 Naqd</button>
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CARD'" (click)="paymentMethodFilter = 'CARD'">💳 Karta</button>
+          </div>
+        </div>
+
+        <div class="filter-group" *ngIf="tablesList.length > 0">
+          <span class="filter-label">🪑 Stol:</span>
+          <select [(ngModel)]="selectedTableFilter" class="pos-input pos-select-sm">
+            <option value="ALL">Barcha stollar</option>
+            <option *ngFor="let t of tablesList" [value]="t.id">{{ t.name }} (#{{ t.tableNumber }})</option>
+          </select>
         </div>
       </div>
 
       <!-- Orders Table Card -->
       <div class="pos-card orders-table-card">
-        <div *ngIf="loading && orders.length === 0" class="loading-state">
+        <div *ngIf="loading && (activeTab === 'PAID' ? historyOrders.length === 0 : orders.length === 0)" class="loading-state">
           <div class="spinner"></div>
           <p>Buyurtmalar yuklanmoqda...</p>
         </div>
@@ -98,7 +129,7 @@ import { TableService } from '../../core/services/table.service';
         <div *ngIf="filteredOrders.length > 0" class="table-responsive">
           <table class="pos-table">
             <thead>
-              <tr>
+              <tr *ngIf="activeTab !== 'PAID'">
                 <th>Chek #</th>
                 <th>Stol / Joy</th>
                 <th>Ofitsiant</th>
@@ -108,70 +139,146 @@ import { TableService } from '../../core/services/table.service';
                 <th>Vaqti</th>
                 <th style="text-align: right;">Amallar</th>
               </tr>
+              <tr *ngIf="activeTab === 'PAID'">
+                <th>Chek #</th>
+                <th>Stol</th>
+                <th>Yopilgan sana & vaqt</th>
+                <th>Mahsulotlar</th>
+                <th>Jami summa</th>
+                <th>To‘lov turi & To‘langan</th>
+                <th>Ofitsiant & Kassir</th>
+                <th>Holati</th>
+                <th style="text-align: right;">Amallar</th>
+              </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let order of filteredOrders" class="order-row">
-                <td class="order-num-col">
-                  <strong>#{{ order.orderNumber }}</strong>
-                </td>
-                <td>
-                  <span class="table-tag">{{ order.tableName || order.tableNumber || 'Olib ketish' }}</span>
-                </td>
-                <td>
-                  <span class="waiter-name">{{ order.waiterName || '—' }}</span>
-                </td>
-                <td>
-                  <span class="items-count-badge">{{ order.items ? order.items.length : 0 }} xil taom</span>
-                </td>
-                <td>
-                  <strong class="total-amount">{{ (order.total || order.subtotal || 0) | number:'1.0-0' }} so'm</strong>
-                </td>
-                <td>
-                  <span class="pos-badge" [ngClass]="getStatusClass(order.status)">
-                    {{ getStatusLabel(order.status) }}
-                  </span>
-                </td>
-                <td class="time-col">
-                  {{ formatTime(order.openedAt || order.createdAt) }}
-                </td>
-                <td class="actions-col">
-                  <div class="action-buttons">
-                    <!-- View Details -->
-                    <button
-                      class="pos-btn pos-btn--secondary pos-btn--sm"
-                      title="Tafsilotlar"
-                      (click)="openDetailModal(order)">
-                      👁️ Ko'rish
-                    </button>
+              <!-- Active Orders Rows -->
+              <ng-container *ngIf="activeTab !== 'PAID'">
+                <tr *ngFor="let order of filteredOrders" class="order-row">
+                  <td class="order-num-col">
+                    <strong>#{{ order.orderNumber }}</strong>
+                  </td>
+                  <td>
+                    <span class="table-tag">{{ order.tableName || order.tableNumber || 'Olib ketish' }}</span>
+                  </td>
+                  <td>
+                    <span class="waiter-name">{{ order.waiterName || '—' }}</span>
+                  </td>
+                  <td>
+                    <span class="items-count-badge">{{ order.items ? order.items.length : 0 }} xil taom</span>
+                  </td>
+                  <td>
+                    <strong class="total-amount">{{ (order.total || order.subtotal || 0) | number:'1.0-0' }} so'm</strong>
+                  </td>
+                  <td>
+                    <span class="pos-badge" [ngClass]="getStatusClass(order.status)">
+                      {{ getStatusLabel(order.status) }}
+                    </span>
+                  </td>
+                  <td class="time-col">
+                    {{ formatTime(order.openedAt || order.createdAt) }}
+                  </td>
+                  <td class="actions-col">
+                    <div class="action-buttons">
+                      <!-- View Details -->
+                      <button
+                        class="pos-btn pos-btn--secondary pos-btn--sm"
+                        title="Tafsilotlar"
+                        (click)="openDetailModal(order)">
+                        👁️ Ko'rish
+                      </button>
 
-                    <!-- Payment Button (Cashier) -->
-                    <button
-                      *ngIf="order.status !== 'PAID' && order.status !== 'CANCELLED'"
-                      class="pos-btn pos-btn--success pos-btn--sm"
-                      title="To'lovni qabul qilish"
-                      (click)="openPaymentModal(order)">
-                      💳 To'lov
-                    </button>
+                      <!-- Payment Button (Cashier) -->
+                      <button
+                        *ngIf="order.status !== 'PAID' && order.status !== 'CANCELLED'"
+                        class="pos-btn pos-btn--success pos-btn--sm"
+                        title="To'lovni qabul qilish"
+                        (click)="openPaymentModal(order)">
+                        💳 To'lov
+                      </button>
 
-                    <!-- Receipt Button -->
-                    <button
-                      class="pos-btn pos-btn--secondary pos-btn--sm"
-                      title="Chek chiqarish"
-                      (click)="openReceiptModal(order)">
-                      🧾 Chek
-                    </button>
+                      <!-- Receipt Button -->
+                      <button
+                        class="pos-btn pos-btn--secondary pos-btn--sm"
+                        title="Chek chiqarish"
+                        (click)="openReceiptModal(order)">
+                        🧾 Chek
+                      </button>
 
-                    <!-- Cancel / Void -->
-                    <button
-                      *ngIf="order.status !== 'PAID' && order.status !== 'CANCELLED'"
-                      class="pos-btn pos-btn--danger pos-btn--sm"
-                      title="Bekor qilish"
-                      (click)="openCancelOrderModal(order, $event)">
-                      ❌
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                      <!-- Cancel / Void -->
+                      <button
+                        *ngIf="order.status !== 'PAID' && order.status !== 'CANCELLED'"
+                        class="pos-btn pos-btn--danger pos-btn--sm"
+                        title="Bekor qilish"
+                        (click)="openCancelOrderModal(order, $event)">
+                        ❌
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </ng-container>
+
+              <!-- Paid History Orders Rows -->
+              <ng-container *ngIf="activeTab === 'PAID'">
+                <tr *ngFor="let order of filteredOrders" class="order-row order-row--history">
+                  <td class="order-num-col">
+                    <strong class="history-order-num">#{{ order.orderNumber }}</strong>
+                  </td>
+                  <td>
+                    <span class="table-tag">{{ order.tableName || order.tableNumber || 'Stol' }}</span>
+                  </td>
+                  <td class="time-col">
+                    <div style="font-weight: 600; color: var(--text-primary);">
+                      {{ formatDateTime(order.closedAt || order.paidAt || order.createdAt) }}
+                    </div>
+                  </td>
+                  <td>
+                    <span class="items-count-badge">{{ order.items ? order.items.length : 0 }} xil taom</span>
+                  </td>
+                  <td>
+                    <strong class="total-amount" style="color: #10b981;">
+                      {{ (order.total || order.subtotal || 0) | number:'1.0-0' }} so'm
+                    </strong>
+                  </td>
+                  <td>
+                    <div class="payment-col">
+                      <span class="payment-method-badge" [class.badge-card]="order.paymentMethod === 'CARD'" [class.badge-cash]="order.paymentMethod !== 'CARD'">
+                        {{ order.paymentMethod === 'CARD' ? '💳 Karta' : '💵 Naqd' }}
+                      </span>
+                      <span class="paid-sub-amount" *ngIf="order.paidAmount">
+                        {{ order.paidAmount | number:'1.0-0' }} so'm
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="staff-info">
+                      <div class="staff-line"><span>Ofitsiant:</span> <strong>{{ order.waiterName || '—' }}</strong></div>
+                      <div class="staff-line"><span>Kassir:</span> <strong>{{ order.cashierName || '—' }}</strong></div>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="pos-badge badge-paid">
+                      TO‘LANGAN
+                    </span>
+                  </td>
+                  <td class="actions-col">
+                    <div class="action-buttons">
+                      <button
+                        class="pos-btn pos-btn--secondary pos-btn--sm"
+                        title="Tafsilotlar (Faqat ko'rish)"
+                        (click)="openDetailModal(order)">
+                        👁️ Ko'rish
+                      </button>
+                      <button
+                        class="pos-btn pos-btn--primary pos-btn--sm"
+                        title="Chek chiqarish"
+                        (click)="openReceiptModal(order)">
+                        🧾 Chek
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </ng-container>
             </tbody>
           </table>
         </div>
@@ -185,7 +292,15 @@ import { TableService } from '../../core/services/table.service';
           <div class="modal-header">
             <div>
               <h2 class="modal-title">Buyurtma #{{ selectedOrder.orderNumber }}</h2>
-              <span class="table-tag" style="margin-top: 4px;">{{ selectedOrder.tableName || selectedOrder.tableNumber || 'Stol' }}</span>
+              <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
+                <span class="table-tag">{{ selectedOrder.tableName || selectedOrder.tableNumber || 'Stol' }}</span>
+                <span class="pos-badge" [ngClass]="getStatusClass(selectedOrder.status)">
+                  {{ getStatusLabel(selectedOrder.status) }}
+                </span>
+                <span *ngIf="selectedOrder.status === 'PAID'" class="history-tag">
+                  📁 TARIXIY BUYURTMA (FAQAT KO‘RISH)
+                </span>
+              </div>
             </div>
             <button class="close-btn" (click)="closeModals()">✕</button>
           </div>
@@ -194,8 +309,12 @@ import { TableService } from '../../core/services/table.service';
             <div class="detail-meta-grid">
               <div><span>Ofitsiant:</span> <strong>{{ selectedOrder.waiterName || '—' }}</strong></div>
               <div><span>Holati:</span> <strong>{{ getStatusLabel(selectedOrder.status) }}</strong></div>
-              <div><span>Ochilgan vaqt:</span> <strong>{{ formatTime(selectedOrder.openedAt || selectedOrder.createdAt) }}</strong></div>
+              <div><span>Ochilgan vaqt:</span> <strong>{{ formatDateTime(selectedOrder.openedAt || selectedOrder.createdAt) }}</strong></div>
               <div><span>Mehmonlar soni:</span> <strong>{{ selectedOrder.guestCount || 1 }} kishi</strong></div>
+              <div *ngIf="selectedOrder.cashierName"><span>Kassir:</span> <strong>{{ selectedOrder.cashierName }}</strong></div>
+              <div *ngIf="selectedOrder.paymentMethod"><span>To‘lov turi:</span> <strong>{{ selectedOrder.paymentMethod === 'CARD' ? '💳 Karta' : '💵 Naqd' }}</strong></div>
+              <div *ngIf="selectedOrder.closedAt || selectedOrder.paidAt"><span>Yopilgan vaqti:</span> <strong>{{ formatDateTime(selectedOrder.closedAt || selectedOrder.paidAt) }}</strong></div>
+              <div *ngIf="selectedOrder.paidAmount"><span>To‘langan summa:</span> <strong style="color: #10b981;">{{ selectedOrder.paidAmount | number:'1.0-0' }} so'm</strong></div>
             </div>
 
             <div *ngIf="selectedOrder.notes" class="order-notes-box">
@@ -211,7 +330,7 @@ import { TableService } from '../../core/services/table.service';
                   <th style="text-align: right;">Narxi</th>
                   <th style="text-align: right;">Jami</th>
                   <th>Oshxona</th>
-                  <th style="text-align: right;">Amal</th>
+                  <th *ngIf="selectedOrder.status !== 'PAID'" style="text-align: right;">Amal</th>
                 </tr>
               </thead>
               <tbody>
@@ -242,9 +361,9 @@ import { TableService } from '../../core/services/table.service';
                       {{ item.voided ? 'CANCELLED' : (item.kitchenStatus || 'NEW') }}
                     </span>
                   </td>
-                  <td style="text-align: right;">
+                  <td *ngIf="selectedOrder.status !== 'PAID'" style="text-align: right;">
                     <button
-                      *ngIf="!item.voided && selectedOrder.status !== 'PAID' && selectedOrder.status !== 'CANCELLED'"
+                      *ngIf="!item.voided && selectedOrder.status !== 'CANCELLED'"
                       class="pos-btn pos-btn--danger pos-btn--sm"
                       style="min-height: 28px; padding: 4px 8px; font-size: 11px;"
                       title="Mahsulotni bekor qilish"
@@ -271,6 +390,14 @@ import { TableService } from '../../core/services/table.service';
                 <span>Jami to'lanishi kerak:</span>
                 <strong>{{ (selectedOrder.total || selectedOrder.subtotal) | number:'1.0-0' }} so'm</strong>
               </div>
+              <div class="summary-line" *ngIf="selectedOrder.paidAmount">
+                <span>To'langan summa:</span>
+                <strong style="color: #10b981;">{{ selectedOrder.paidAmount | number:'1.0-0' }} so'm</strong>
+              </div>
+              <div class="summary-line" *ngIf="selectedOrder.changeAmount && selectedOrder.changeAmount > 0">
+                <span>Qaytim (Сдача):</span>
+                <span>{{ selectedOrder.changeAmount | number:'1.0-0' }} so'm</span>
+              </div>
             </div>
           </div>
 
@@ -282,8 +409,17 @@ import { TableService } from '../../core/services/table.service';
                 (click)="openCancelOrderModal(selectedOrder, $event)">
                 🚫 Butun buyurtmani bekor qilish
               </button>
+              <span *ngIf="selectedOrder.status === 'PAID'" style="color: var(--text-muted); font-size: 13px;">
+                🔒 Tarixdagi yopilgan buyurtma faqat ko‘rish uchun. Stolga yoki oshxonaga qaytarilmaydi.
+              </span>
             </div>
             <div style="display: flex; gap: 8px;">
+              <button
+                *ngIf="selectedOrder.status === 'PAID'"
+                class="pos-btn pos-btn--primary"
+                (click)="showDetailModal = false; openReceiptModal(selectedOrder)">
+                🧾 Chekni ko'rish / Qayta chop etish
+              </button>
               <button class="pos-btn pos-btn--secondary" (click)="closeModals()">Yopish</button>
               <button
                 *ngIf="selectedOrder.status !== 'PAID' && selectedOrder.status !== 'CANCELLED'"
@@ -413,8 +549,10 @@ import { TableService } from '../../core/services/table.service';
               <div class="receipt-meta">
                 <div>Chek: #{{ selectedOrder.orderNumber }}</div>
                 <div>Stol: {{ selectedOrder.tableName || selectedOrder.tableNumber || 'Stol' }}</div>
-                <div>Ofitsiant: {{ selectedOrder.waiterName || 'Kassa' }}</div>
-                <div>Vaqt: {{ formatTime(selectedOrder.openedAt || selectedOrder.createdAt) }}</div>
+                <div>Ofitsiant: {{ selectedOrder.waiterName || '—' }}</div>
+                <div *ngIf="selectedOrder.cashierName">Kassir: {{ selectedOrder.cashierName }}</div>
+                <div>Vaqt: {{ formatDateTime(selectedOrder.openedAt || selectedOrder.createdAt) }}</div>
+                <div *ngIf="selectedOrder.closedAt || selectedOrder.paidAt">Yopilgan: {{ formatDateTime(selectedOrder.closedAt || selectedOrder.paidAt) }}</div>
                 <div class="receipt-divider">--------------------------------</div>
               </div>
 
@@ -441,6 +579,18 @@ import { TableService } from '../../core/services/table.service';
                 <div class="r-total-row final">
                   <span>JAMI:</span>
                   <span>{{ (selectedOrder.total || selectedOrder.subtotal) | number:'1.0-0' }} so'm</span>
+                </div>
+                <div class="r-total-row" *ngIf="selectedOrder.paymentMethod">
+                  <span>To'lov usuli:</span>
+                  <span>{{ selectedOrder.paymentMethod === 'CARD' ? 'KARTA' : 'NAQD' }}</span>
+                </div>
+                <div class="r-total-row" *ngIf="selectedOrder.paidAmount">
+                  <span>To'langan:</span>
+                  <span>{{ selectedOrder.paidAmount | number:'1.0-0' }} so'm</span>
+                </div>
+                <div class="r-total-row" *ngIf="selectedOrder.changeAmount && selectedOrder.changeAmount > 0">
+                  <span>Qaytim:</span>
+                  <span>{{ selectedOrder.changeAmount | number:'1.0-0' }} so'm</span>
                 </div>
                 <div class="receipt-divider">================================</div>
               </div>
@@ -764,6 +914,137 @@ import { TableService } from '../../core/services/table.service';
       strong {
         font-size: 15px;
       }
+    }
+
+    /* History Filter Bar */
+    .history-filter-bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      margin-bottom: 4px;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .filter-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .pill-group {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 2px;
+    }
+
+    .pill-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 5px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        color: var(--text-primary);
+      }
+
+      &.active {
+        background: var(--primary);
+        color: white;
+      }
+    }
+
+    .pos-select-sm {
+      padding: 6px 10px;
+      font-size: 13px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+
+    .history-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .payment-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .payment-method-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      width: fit-content;
+
+      &.badge-cash {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+
+      &.badge-card {
+        background: rgba(59, 130, 246, 0.15);
+        color: #3b82f6;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+    }
+
+    .paid-sub-amount {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .staff-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 12px;
+
+      .staff-line span {
+        color: var(--text-muted);
+        margin-right: 4px;
+      }
+      .staff-line strong {
+        color: var(--text-primary);
+      }
+    }
+
+    .history-order-num {
+      color: #6366f1;
+      font-weight: 800;
     }
 
     /* Table */
@@ -1518,9 +1799,16 @@ import { TableService } from '../../core/services/table.service';
 })
 export class OrdersListComponent implements OnInit {
   orders: Order[] = [];
+  historyOrders: Order[] = [];
+  tablesList: RestaurantTable[] = [];
   loading = false;
   searchQuery = '';
   activeTab: 'ALL' | 'ACTIVE' | 'KITCHEN' | 'READY' | 'PAID' = 'ALL';
+
+  // History filters
+  dateFilter: 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' = 'ALL';
+  paymentMethodFilter: 'ALL' | 'CASH' | 'CARD' = 'ALL';
+  selectedTableFilter: string = 'ALL';
 
   // Modals
   selectedOrder: Order | null = null;
@@ -1562,6 +1850,9 @@ export class OrdersListComponent implements OnInit {
     this.loading = true;
     this.cdr.markForCheck();
 
+    this.loadTablesList();
+    this.loadHistoryOrders();
+
     this.orderService.getActiveOrders().subscribe({
       next: (res) => {
         if (res.data) {
@@ -1578,7 +1869,100 @@ export class OrdersListComponent implements OnInit {
     });
   }
 
+  loadTablesList(): void {
+    this.tableService.getTables().subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.tablesList = res.data;
+          this.cdr.markForCheck();
+        }
+      },
+      error: () => {}
+    });
+  }
+
+  loadHistoryOrders(): void {
+    this.orderService.getOrderHistory().subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.historyOrders = res.data;
+          this.cdr.markForCheck();
+        }
+      },
+      error: (err) => {
+        console.error('Failed to load order history', err);
+      }
+    });
+  }
+
+  setTab(tab: 'ALL' | 'ACTIVE' | 'KITCHEN' | 'READY' | 'PAID'): void {
+    this.activeTab = tab;
+    if (tab === 'PAID') {
+      this.loadHistoryOrders();
+    }
+  }
+
   get filteredOrders(): Order[] {
+    if (this.activeTab === 'PAID') {
+      return this.historyOrders.filter(order => {
+        // Date filter
+        if (this.dateFilter !== 'ALL') {
+          const dateStr = order.closedAt || order.paidAt || order.openedAt || order.createdAt;
+          if (!dateStr) return false;
+          const orderDate = new Date(dateStr);
+          const now = new Date();
+
+          if (this.dateFilter === 'TODAY') {
+            const isToday = orderDate.getFullYear() === now.getFullYear() &&
+                            orderDate.getMonth() === now.getMonth() &&
+                            orderDate.getDate() === now.getDate();
+            if (!isToday) return false;
+          } else if (this.dateFilter === 'YESTERDAY') {
+            const yesterday = new Date(now);
+            yesterday.setDate(now.getDate() - 1);
+            const isYesterday = orderDate.getFullYear() === yesterday.getFullYear() &&
+                                orderDate.getMonth() === yesterday.getMonth() &&
+                                orderDate.getDate() === yesterday.getDate();
+            if (!isYesterday) return false;
+          } else if (this.dateFilter === 'THIS_WEEK') {
+            const oneWeekAgo = new Date(now);
+            oneWeekAgo.setDate(now.getDate() - 7);
+            if (orderDate < oneWeekAgo) return false;
+          } else if (this.dateFilter === 'THIS_MONTH') {
+            const isThisMonth = orderDate.getFullYear() === now.getFullYear() &&
+                                orderDate.getMonth() === now.getMonth();
+            if (!isThisMonth) return false;
+          }
+        }
+
+        // Payment method filter
+        if (this.paymentMethodFilter !== 'ALL') {
+          if ((order.paymentMethod || '').toUpperCase() !== this.paymentMethodFilter) {
+            return false;
+          }
+        }
+
+        // Table filter
+        if (this.selectedTableFilter !== 'ALL') {
+          if (order.tableId !== this.selectedTableFilter) {
+            return false;
+          }
+        }
+
+        // Search filter
+        if (this.searchQuery.trim()) {
+          const q = this.searchQuery.toLowerCase();
+          const numMatch = order.orderNumber?.toLowerCase().includes(q);
+          const tblMatch = (order.tableName || order.tableNumber)?.toLowerCase().includes(q);
+          const waiterMatch = order.waiterName?.toLowerCase().includes(q);
+          const cashierMatch = order.cashierName?.toLowerCase().includes(q);
+          return numMatch || tblMatch || waiterMatch || cashierMatch;
+        }
+
+        return true;
+      });
+    }
+
     return this.orders.filter(order => {
       // Tab filter
       if (this.activeTab === 'ACTIVE') {
@@ -1587,8 +1971,6 @@ export class OrdersListComponent implements OnInit {
         if (order.status !== 'SENT_TO_KITCHEN' && order.status !== 'PREPARING') return false;
       } else if (this.activeTab === 'READY') {
         if (order.status !== 'READY') return false;
-      } else if (this.activeTab === 'PAID') {
-        if (order.status !== 'PAID') return false;
       }
 
       // Search filter
@@ -1617,12 +1999,20 @@ export class OrdersListComponent implements OnInit {
   }
 
   get paidOrdersCount(): number {
-    return this.orders.filter(o => o.status === 'PAID').length;
+    return this.historyOrders.length;
   }
 
   get todayTotalRevenue(): number {
-    return this.orders
-      .filter(o => o.status === 'PAID')
+    const now = new Date();
+    return this.historyOrders
+      .filter(o => {
+        const dStr = o.closedAt || o.paidAt || o.createdAt;
+        if (!dStr) return false;
+        const d = new Date(dStr);
+        return d.getFullYear() === now.getFullYear() &&
+               d.getMonth() === now.getMonth() &&
+               d.getDate() === now.getDate();
+      })
       .reduce((sum, o) => sum + (o.total || o.subtotal || 0), 0);
   }
 

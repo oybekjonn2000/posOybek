@@ -32,6 +32,17 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
 
+    @GetMapping("/history")
+    @Operation(summary = "Get paid/closed orders history")
+    public ResponseEntity<ApiResponse<List<OrderDto.Response>>> getOrderHistory(
+            @RequestParam(required = false) UUID tableId,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) String search,
+            @AuthenticationPrincipal UserPrincipal user) {
+        List<OrderDto.Response> orders = orderService.getOrderHistory(user.getTenantId(), tableId, paymentMethod, search);
+        return ResponseEntity.ok(ApiResponse.success(orders));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get order by ID")
     public ResponseEntity<ApiResponse<OrderDto.Response>> getOrder(
@@ -60,6 +71,17 @@ public class OrderController {
             @AuthenticationPrincipal UserPrincipal user) {
         OrderDto.Response order = orderService.addItemsToOrder(id, user.getTenantId(), request);
         return ResponseEntity.ok(ApiResponse.success(order, "Items added to order"));
+    }
+
+    @PostMapping("/{id}/send-to-kitchen")
+    @PreAuthorize("hasAnyAuthority('CREATE_ORDER', 'EDIT_ORDER', 'ROLE_ADMIN', 'ROLE_MANAGER', 'ROLE_WAITER')")
+    @Operation(summary = "Send NEW items in order to kitchen stations without re-sending already-sent items")
+    public ResponseEntity<ApiResponse<OrderDto.Response>> sendToKitchen(
+            @PathVariable UUID id,
+            @RequestBody(required = false) OrderDto.SendToKitchenRequest request,
+            @AuthenticationPrincipal UserPrincipal user) {
+        OrderDto.Response order = orderService.sendNewItemsToKitchen(id, user.getTenantId(), request);
+        return ResponseEntity.ok(ApiResponse.success(order, "Yangi mahsulotlar oshxonaga muvaffaqiyatli yuborildi"));
     }
 
     @DeleteMapping("/{id}/items/{itemId}")

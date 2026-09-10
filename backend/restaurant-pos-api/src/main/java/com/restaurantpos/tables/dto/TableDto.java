@@ -7,6 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 public class TableDto {
@@ -41,6 +42,9 @@ public class TableDto {
         private int height;
         private String status;
         private UUID currentOrderId;
+        private String activeOrderNumber;
+        private Integer itemCount;
+        private BigDecimal totalAmount;
         private boolean active;
     }
 

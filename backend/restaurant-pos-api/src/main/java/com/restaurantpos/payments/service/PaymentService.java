@@ -1,6 +1,7 @@
 package com.restaurantpos.payments.service;
 
 import com.restaurantpos.common.exception.PosException;
+import com.restaurantpos.orders.dto.OrderDto;
 import com.restaurantpos.orders.entity.Order;
 import com.restaurantpos.orders.repository.OrderRepository;
 import com.restaurantpos.payments.dto.PaymentDto;
@@ -35,6 +36,8 @@ public class PaymentService {
     private final UserRepository userRepository;
     private final ShiftRepository shiftRepository;
     private final EntityManager entityManager;
+    private final com.restaurantpos.common.websocket.WebSocketNotificationService wsNotification;
+    private final com.restaurantpos.orders.service.OrderService orderService;
 
     private long nextPaymentSequence() {
         return ((Number) entityManager
@@ -78,17 +81,25 @@ public class PaymentService {
 
         // Update Order status to PAID
         order.setStatus(Order.OrderStatus.PAID);
-        order.setPaidAt(Instant.now());
-        order.setClosedAt(Instant.now());
-        orderRepository.save(order);
+        order.setCashier(cashier);
+        Instant now = Instant.now();
+        order.setPaidAt(now);
+        order.setClosedAt(now);
+        Order savedOrder = orderRepository.save(order);
 
         // Free the table
         if (order.getTable() != null) {
             RestaurantTable table = order.getTable();
             table.setStatus(com.restaurantpos.tables.entity.RestaurantTable.TableStatus.FREE);
             table.setCurrentOrderId(null);
-            tableRepository.save(table);
+            RestaurantTable savedTable = tableRepository.save(table);
+            wsNotification.notifyTableUpdated(tenantId, orderService.toTableResponse(savedTable, null));
         }
+
+        // Notify order status changed & paid
+        OrderDto.Response orderResponse = orderService.toResponse(savedOrder);
+        wsNotification.notifyOrderStatusChanged(tenantId, orderResponse);
+        wsNotification.notifyOrderPaid(tenantId, order.getId());
 
         // Update Shift totals if shift is active
         if (shift != null) {
