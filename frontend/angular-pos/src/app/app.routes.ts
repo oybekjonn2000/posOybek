@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { inject } from '@angular/core';
 import { authGuard } from './core/guards/auth.guard';
 import { permissionGuard } from './core/guards/permission.guard';
+import { adminGuard } from './core/guards/admin.guard';
 import { AuthService } from './core/services/auth.service';
 
 export const routes: Routes = [
@@ -32,23 +33,25 @@ export const routes: Routes = [
         path: 'pos',
         loadComponent: () => import('./orders/pos/pos.component').then(m => m.PosComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'CREATE_ORDER', title: 'POS' }
+        data: { permission: 'CREATE_ORDER', disallowRoles: ['KITCHEN'], title: 'POS' }
       },
       {
         path: 'tables',
         loadComponent: () => import('./tables/tables.component').then(m => m.TablesComponent),
-        data: { title: 'Tables' }
+        canActivate: [permissionGuard],
+        data: { disallowRoles: ['KITCHEN'], title: 'Tables' }
       },
       {
         path: 'kitchen',
         loadComponent: () => import('./kitchen/kitchen.component').then(m => m.KitchenComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'KITCHEN_VIEW', title: 'Kitchen' }
+        data: { permission: 'KITCHEN_VIEW', disallowRoles: ['WAITER'], title: 'Kitchen' }
       },
       {
         path: 'orders',
         loadComponent: () => import('./orders/orders-list/orders-list.component').then(m => m.OrdersListComponent),
-        data: { title: 'Orders' }
+        canActivate: [permissionGuard],
+        data: { disallowRoles: ['KITCHEN'], title: 'Orders' }
       },
       {
         path: 'products',
@@ -70,6 +73,7 @@ export const routes: Routes = [
       {
         path: 'customers',
         loadComponent: () => import('./customers/customers.component').then(m => m.CustomersComponent),
+        canActivate: [adminGuard],
         data: { title: 'Customers' }
       },
       {
@@ -99,6 +103,7 @@ export const routes: Routes = [
       {
         path: 'shifts',
         loadComponent: () => import('./shifts/shifts.component').then(m => m.ShiftsComponent),
+        canActivate: [adminGuard],
         data: { title: 'Shifts' }
       }
     ]

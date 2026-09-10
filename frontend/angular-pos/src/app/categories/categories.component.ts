@@ -2,7 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CategoryService, Category, CreateCategoryRequest } from '../core/services/category.service';
-import { ProductService } from '../core/services/product.service';
+import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
 
 @Component({
   selector: 'app-categories',
@@ -14,11 +14,30 @@ import { ProductService } from '../core/services/product.service';
       <div class="page-header">
         <div>
           <h1 class="page-title">🏷️ Bo'limlar & Kategoriyalar</h1>
-          <p class="page-subtitle">Menyu bo'limlarini shakllantirish, tartibga solish va boshqarish</p>
+          <p class="page-subtitle">Ierarxiya: <strong>Oshxona ➔ Kategoriya ➔ Mahsulot</strong>. Har bir kategoriya qat'iy bitta oshxonaga tegishli.</p>
         </div>
 
         <button class="pos-btn pos-btn--primary" (click)="openCreateModal()">
-          <span>➕ Yangi Bo'lim Qo'shish</span>
+          <span>➕ Yangi Kategoriya Qo'shish</span>
+        </button>
+      </div>
+
+      <!-- Kitchen Filter Tabs -->
+      <div class="kitchen-filter-tabs">
+        <button
+          class="kitchen-tab-btn"
+          [class.active]="selectedKitchenFilter === null"
+          (click)="selectedKitchenFilter = null">
+          <span>🍽️ Barcha Oshxonalar</span>
+          <span class="count-badge">{{ categories.length }}</span>
+        </button>
+        <button
+          *ngFor="let k of kitchens"
+          class="kitchen-tab-btn"
+          [class.active]="selectedKitchenFilter === k.id"
+          (click)="selectedKitchenFilter = k.id">
+          <span>{{ getKitchenEmoji(k.code) }} {{ k.name }}</span>
+          <span class="count-badge">{{ getCategoriesCountForKitchen(k.id) }}</span>
         </button>
       </div>
 
@@ -29,24 +48,34 @@ import { ProductService } from '../core/services/product.service';
           <p>Kategoriyalar yuklanmoqda...</p>
         </div>
 
-        <div *ngIf="!loading && categories.length === 0" class="empty-state">
+        <div *ngIf="!loading && filteredCategories.length === 0" class="empty-state">
           <div class="empty-icon">📁</div>
           <h3>Kategoriyalar mavjud emas</h3>
-          <p>Restoran menyusi uchun birinchi bo'limni yarating.</p>
+          <p>Ushbu oshxona uchun hali kategoriya yaratilmagan.</p>
           <button class="pos-btn pos-btn--primary" (click)="openCreateModal()" style="margin-top: 12px;">
-            Yangi bo'lim yaratish
+            Yangi kategoriya yaratish
           </button>
         </div>
 
-        <div *ngIf="categories.length > 0" class="category-grid">
-          <div *ngFor="let cat of categories" class="category-card">
+        <div *ngIf="filteredCategories.length > 0" class="category-grid">
+          <div *ngFor="let cat of filteredCategories" class="category-card">
             <div class="card-top">
               <div class="color-badge" [style.background-color]="cat.color || '#6366f1'"></div>
               <div class="cat-details">
                 <h3 class="cat-name">{{ cat.name }}</h3>
-                <span class="cat-count">{{ cat.productCount || 0 }} ta taom</span>
+                <div class="cat-station-badge">
+                  <span class="station-icon">{{ getKitchenEmoji(cat.kitchenCode) }}</span>
+                  <span class="station-name">{{ cat.kitchenName || getKitchenName(cat.kitchenId) }}</span>
+                </div>
               </div>
               <div class="sort-badge">#{{ cat.sortOrder }}</div>
+            </div>
+
+            <div class="card-meta">
+              <span class="meta-item">📦 {{ cat.productCount || 0 }} ta mahsulot</span>
+              <span class="status-indicator" [class.active]="cat.active !== false">
+                {{ cat.active !== false ? '● Faol' : '○ Nofaol' }}
+              </span>
             </div>
 
             <div class="card-actions">
@@ -67,34 +96,68 @@ import { ProductService } from '../core/services/product.service';
       <div class="modal-overlay" *ngIf="showModal" (click)="closeModal()">
         <div class="modal-card" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2 class="modal-title">{{ isEditing ? '✏️ Bo‘limni tahrirlash' : '➕ Yangi Bo‘lim' }}</h2>
+            <h2 class="modal-title">{{ isEditing ? '✏️ Kategoriyani tahrirlash' : '➕ Yangi Kategoriya' }}</h2>
             <button class="close-btn" (click)="closeModal()">✕</button>
           </div>
 
           <div class="modal-body form-body">
+            <!-- Kitchen Selection (MANDATORY) -->
             <div class="form-group">
-              <label class="form-label">Bo'lim nomi *</label>
+              <label class="form-label">
+                Oshxona (KDS Stansiyasi) <span class="required-star">*</span>
+              </label>
+              <select
+                [(ngModel)]="formData.kitchenId"
+                class="pos-input"
+                [class.input-error]="kitchenError"
+                (change)="onKitchenSelected()"
+                required>
+                <option [ngValue]="''" disabled selected>Oshxonani tanlang ▼</option>
+                <option *ngFor="let k of kitchens" [value]="k.id">
+                  {{ getKitchenEmoji(k.code) }} {{ k.name }} ({{ k.code }})
+                </option>
+              </select>
+              <span class="error-hint" *ngIf="kitchenError">
+                ⚠️ Oshxona tanlanishi kerak!
+              </span>
+            </div>
+
+            <!-- Category Name -->
+            <div class="form-group">
+              <label class="form-label">
+                Kategoriya nomi <span class="required-star">*</span>
+              </label>
               <input
                 type="text"
                 [(ngModel)]="formData.name"
                 class="pos-input"
-                placeholder="Masalan: Milliy Taomlar"
+                placeholder="Masalan: Milliy taomlar, Sovuq ichimliklar..."
                 required
               />
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Tartib raqami (Sort order)</label>
-              <input
-                type="number"
-                [(ngModel)]="formData.sortOrder"
-                class="pos-input"
-                placeholder="1, 2, 3..."
-              />
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label class="form-label">Tartib raqami</label>
+                <input
+                  type="number"
+                  [(ngModel)]="formData.sortOrder"
+                  class="pos-input"
+                  placeholder="1, 2, 3..."
+                />
+              </div>
+
+              <div class="form-group checkbox-flex">
+                <label class="checkbox-label">
+                  <input type="checkbox" [(ngModel)]="formData.active" />
+                  <span>Faol holatda</span>
+                </label>
+              </div>
             </div>
 
+            <!-- Color Picker -->
             <div class="form-group">
-              <label class="form-label">Rangi</label>
+              <label class="form-label">Rangi / Yorlig'i</label>
               <div class="color-picker-row">
                 <input
                   type="color"
@@ -106,6 +169,7 @@ import { ProductService } from '../core/services/product.service';
                     *ngFor="let col of presetColors"
                     class="preset-color-dot"
                     [style.background-color]="col"
+                    [class.selected]="formData.color === col"
                     (click)="formData.color = col"></span>
                 </div>
               </div>
@@ -119,7 +183,7 @@ import { ProductService } from '../core/services/product.service';
             <button
               class="pos-btn pos-btn--primary"
               (click)="saveCategory()"
-              [disabled]="saving || !formData.name">
+              [disabled]="saving || !formData.name || !formData.kitchenId">
               <span>{{ saving ? 'Saqlanmoqda...' : 'Saqlash' }}</span>
             </button>
           </div>
@@ -160,6 +224,52 @@ import { ProductService } from '../core/services/product.service';
       margin: 4px 0 0 0;
     }
 
+    .kitchen-filter-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .kitchen-tab-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+
+      &:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      &.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+        .count-badge {
+          background: rgba(255, 255, 255, 0.25);
+          color: white;
+        }
+      }
+    }
+
+    .count-badge {
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+    }
+
     .content-card {
       padding: 24px;
     }
@@ -177,7 +287,7 @@ import { ProductService } from '../core/services/product.service';
       padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
       transition: all var(--transition);
 
       &:hover {
@@ -189,31 +299,41 @@ import { ProductService } from '../core/services/product.service';
 
     .card-top {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 12px;
     }
 
     .color-badge {
-      width: 16px;
-      height: 42px;
+      width: 14px;
+      height: 48px;
       border-radius: 4px;
       flex-shrink: 0;
     }
 
     .cat-details {
       flex: 1;
+      min-width: 0;
     }
 
     .cat-name {
       font-size: 16px;
       font-weight: 700;
       color: var(--text-primary);
-      margin: 0 0 2px 0;
+      margin: 0 0 4px 0;
+      word-break: break-word;
     }
 
-    .cat-count {
+    .cat-station-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
       font-size: 12px;
-      color: var(--text-muted);
+      font-weight: 600;
+      color: var(--primary-light);
+      background: rgba(var(--primary-rgb), 0.1);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(var(--primary-rgb), 0.2);
     }
 
     .sort-badge {
@@ -223,6 +343,21 @@ import { ProductService } from '../core/services/product.service';
       background: var(--bg-tertiary);
       padding: 3px 8px;
       border-radius: 4px;
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding-top: 4px;
+    }
+
+    .status-indicator {
+      font-weight: 600;
+      &.active { color: #10b981; }
+      &:not(.active) { color: #ef4444; }
     }
 
     .card-actions {
@@ -257,7 +392,7 @@ import { ProductService } from '../core/services/product.service';
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       width: 100%;
-      max-width: 440px;
+      max-width: 480px;
       box-shadow: var(--shadow-lg);
       overflow: hidden;
     }
@@ -298,10 +433,41 @@ import { ProductService } from '../core/services/product.service';
       gap: 6px;
     }
 
-    .form-label {
+    .form-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .flex-1 { flex: 1; }
+
+    .checkbox-flex {
+      padding-bottom: 8px;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
       font-size: 13px;
-      color: var(--text-secondary);
-      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .required-star {
+      color: #ef4444;
+      font-weight: bold;
+    }
+
+    .input-error {
+      border-color: #ef4444 !important;
+      background: rgba(239, 68, 68, 0.05);
+    }
+
+    .error-hint {
+      font-size: 12px;
+      color: #ef4444;
+      margin-top: 2px;
     }
 
     .color-picker-row {
@@ -311,45 +477,45 @@ import { ProductService } from '../core/services/product.service';
     }
 
     .color-input {
-      width: 44px;
-      height: 44px;
-      padding: 0;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
+      width: 42px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
       background: transparent;
+      cursor: pointer;
+      padding: 2px;
     }
 
     .preset-colors {
       display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .preset-color-dot {
-      width: 28px;
-      height: 28px;
+      width: 24px;
+      height: 24px;
       border-radius: 50%;
       cursor: pointer;
-      transition: transform var(--transition);
+      transition: transform 0.15s;
+      border: 2px solid transparent;
 
-      &:hover {
-        transform: scale(1.15);
-      }
+      &:hover { transform: scale(1.15); }
+      &.selected { border-color: white; box-shadow: 0 0 0 2px var(--primary); }
     }
 
     .modal-footer {
       display: flex;
       justify-content: flex-end;
-      gap: 12px;
+      gap: 10px;
       padding: 16px 20px;
       background: var(--bg-tertiary);
       border-top: 1px solid var(--border);
     }
 
     .loading-state, .empty-state {
-      padding: 50px 20px;
       text-align: center;
-      color: var(--text-secondary);
+      padding: 40px 20px;
     }
 
     .empty-icon {
@@ -358,48 +524,63 @@ import { ProductService } from '../core/services/product.service';
     }
 
     .spinner {
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       border: 3px solid var(--border);
       border-top-color: var(--primary);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
+      margin: 0 auto 16px;
     }
 
-    @keyframes spin {
-      100% { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   `]
 })
 export class CategoriesComponent implements OnInit {
   categories: Category[] = [];
+  kitchens: KitchenStation[] = [];
+  selectedKitchenFilter: string | null = null;
   loading = false;
-
   showModal = false;
   isEditing = false;
   editingId: string | null = null;
   saving = false;
+  kitchenError = false;
 
   presetColors = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
   formData: CreateCategoryRequest = {
     name: '',
+    kitchenId: '',
     sortOrder: 1,
-    color: '#6366f1'
+    color: '#6366f1',
+    active: true
   };
 
   constructor(
     private categoryService: CategoryService,
-    private productService: ProductService
+    private kitchenService: KitchenService
   ) {}
 
   ngOnInit(): void {
-    this.loadCategories();
+    this.loadData();
+  }
+
+  loadData(): void {
+    this.loading = true;
+    this.kitchenService.getKitchens().subscribe({
+      next: (kRes) => {
+        this.kitchens = kRes.data || [];
+        this.loadCategories();
+      },
+      error: (err) => {
+        console.error('Failed to load kitchens', err);
+        this.loadCategories();
+      }
+    });
   }
 
   loadCategories(): void {
-    this.loading = true;
     this.categoryService.getCategories().subscribe({
       next: (res) => {
         this.categories = res.data || [];
@@ -412,13 +593,49 @@ export class CategoriesComponent implements OnInit {
     });
   }
 
+  get filteredCategories(): Category[] {
+    if (!this.selectedKitchenFilter) {
+      return this.categories;
+    }
+    return this.categories.filter(c => c.kitchenId === this.selectedKitchenFilter);
+  }
+
+  getCategoriesCountForKitchen(kitchenId: string): number {
+    return this.categories.filter(c => c.kitchenId === kitchenId).length;
+  }
+
+  getKitchenName(kitchenId?: string): string {
+    if (!kitchenId) return 'Oshxona biriktirilmagan';
+    const k = this.kitchens.find(item => item.id === kitchenId);
+    return k ? k.name : 'Oshxona biriktirilmagan';
+  }
+
+  getKitchenEmoji(code?: string): string {
+    if (!code) return '👨‍🍳';
+    switch (code.toUpperCase()) {
+      case 'PALOV': case 'PALOVCHI': return '🥘';
+      case 'SOMSA': case 'SOMSAPAZ': return '🥟';
+      case 'BAR': return '🍹';
+      case 'PIZZA': case 'PITSA': return '🍕';
+      case 'MAIN': case 'MAIN_KITCHEN': return '👨‍🍳';
+      default: return '🍳';
+    }
+  }
+
   openCreateModal(): void {
     this.isEditing = false;
     this.editingId = null;
+    this.kitchenError = false;
+
+    // Default to currently selected filter kitchen if one is selected
+    const defaultKitchenId = this.selectedKitchenFilter || (this.kitchens.length > 0 ? this.kitchens[0].id : '');
+
     this.formData = {
       name: '',
+      kitchenId: defaultKitchenId,
       sortOrder: this.categories.length + 1,
-      color: this.presetColors[this.categories.length % this.presetColors.length]
+      color: this.presetColors[this.categories.length % this.presetColors.length],
+      active: true
     };
     this.showModal = true;
   }
@@ -426,19 +643,35 @@ export class CategoriesComponent implements OnInit {
   openEditModal(cat: Category): void {
     this.isEditing = true;
     this.editingId = cat.id;
+    this.kitchenError = false;
     this.formData = {
       name: cat.name,
+      kitchenId: cat.kitchenId || '',
       sortOrder: cat.sortOrder,
-      color: cat.color || '#6366f1'
+      color: cat.color || '#6366f1',
+      active: cat.active !== false
     };
     this.showModal = true;
   }
 
+  onKitchenSelected(): void {
+    if (this.formData.kitchenId) {
+      this.kitchenError = false;
+    }
+  }
+
   closeModal(): void {
     this.showModal = false;
+    this.kitchenError = false;
   }
 
   saveCategory(): void {
+    if (!this.formData.kitchenId) {
+      this.kitchenError = true;
+      alert('Oshxona tanlanishi kerak!');
+      return;
+    }
+
     if (!this.formData.name.trim()) {
       alert('Iltimos, kategoriya nomini kiriting!');
       return;
@@ -473,14 +706,16 @@ export class CategoriesComponent implements OnInit {
   }
 
   deleteCategory(cat: Category): void {
-    if (!confirm(`"${cat.name}" bo'limini o'chirmoqchimisiz?`)) {
+    if (!confirm(`"${cat.name}" kategoriyasini o'chirmoqchimisiz?`)) {
       return;
     }
     this.categoryService.deleteCategory(cat.id).subscribe({
       next: () => {
         this.loadCategories();
       },
-      error: (err) => alert('Xatolik: ' + (err.error?.message || err.message))
+      error: (err) => {
+        alert('O‘chirishda xatolik:\n' + (err.error?.message || err.message));
+      }
     });
   }
 }

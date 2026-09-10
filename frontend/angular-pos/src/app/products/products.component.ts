@@ -15,7 +15,9 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
       <div class="page-header">
         <div class="header-left">
           <h1 class="page-title">🍔 Mahsulotlar & Menyu</h1>
-          <p class="page-subtitle">Restoran taomlari, ichimliklari va menyusini to'liq boshqarish</p>
+          <p class="page-subtitle">
+            Ierarxiya: <strong>Oshxona ➔ Kategoriya ➔ Mahsulot</strong>. Mahsulot oshxonani faqat o'z kategoriyasi orqali aniqlaydi.
+          </p>
         </div>
 
         <div class="header-actions">
@@ -35,20 +37,41 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         </div>
       </div>
 
-      <!-- Categories Filter Tabs -->
-      <div class="categories-strip">
+      <!-- 1. KITCHEN FILTER STRIP -->
+      <div class="filter-strip kitchen-strip">
+        <span class="filter-title">Oshxona:</span>
         <button
-          class="cat-chip"
-          [class.active]="selectedCategoryId === null"
-          (click)="selectedCategoryId = null">
-          Barchasi ({{ products.length }})
+          class="filter-chip"
+          [class.active]="selectedKitchenId === null"
+          (click)="selectKitchenFilter(null)">
+          <span>🍽️ Barcha Oshxonalar</span>
+          <span class="count-pill">{{ products.length }}</span>
         </button>
         <button
-          *ngFor="let cat of categories"
-          class="cat-chip"
+          *ngFor="let k of kitchens"
+          class="filter-chip"
+          [class.active]="selectedKitchenId === k.id"
+          (click)="selectKitchenFilter(k.id)">
+          <span>{{ getKitchenEmoji(k.code) }} {{ k.name }}</span>
+          <span class="count-pill">{{ getProductsCountForKitchen(k.id) }}</span>
+        </button>
+      </div>
+
+      <!-- 2. CATEGORY FILTER STRIP (Filtered by selected Kitchen) -->
+      <div class="filter-strip category-strip">
+        <span class="filter-title">Kategoriya:</span>
+        <button
+          class="filter-chip filter-chip--sm"
+          [class.active]="selectedCategoryId === null"
+          (click)="selectedCategoryId = null">
+          Barcha bo'limlar
+        </button>
+        <button
+          *ngFor="let cat of visibleCategories"
+          class="filter-chip filter-chip--sm"
           [class.active]="selectedCategoryId === cat.id"
           (click)="selectedCategoryId = cat.id">
-          {{ cat.name }}
+          {{ cat.name }} ({{ cat.productCount || getProductsCountForCategory(cat.id) }})
         </button>
       </div>
 
@@ -62,7 +85,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         <div *ngIf="!loading && filteredProducts.length === 0" class="empty-state">
           <div class="empty-icon">🍽️</div>
           <h3>Mahsulotlar topilmadi</h3>
-          <p>Ushbu kategoriya bo'yicha yoki qidiruv natijasida mahsulot yo'q.</p>
+          <p>Ushbu oshxona/kategoriya bo'yicha yoki qidiruv natijasida mahsulot yo'q.</p>
           <button class="pos-btn pos-btn--primary" (click)="openCreateModal()" style="margin-top: 12px;">
             Yangi mahsulot qo'shish
           </button>
@@ -75,7 +98,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
                 <th>Taom / Mahsulot</th>
                 <th>SKU</th>
                 <th>Kategoriya</th>
-                <th>Oshxona</th>
+                <th>Oshxona (KDS)</th>
                 <th style="text-align: right;">Sotish narxi</th>
                 <th style="text-align: right;">Tannarxi</th>
                 <th>Birligi</th>
@@ -87,7 +110,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               <tr *ngFor="let p of filteredProducts">
                 <td>
                   <div class="product-title-cell">
-                    <span class="p-icon">🍲</span>
+                    <span class="p-icon">{{ getProductEmoji(p.name, p.categoryName) }}</span>
                     <div>
                       <strong>{{ p.name }}</strong>
                       <div *ngIf="p.nameUz" class="sub-name">{{ p.nameUz }}</div>
@@ -101,12 +124,12 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
                   <span class="cat-tag">{{ p.categoryName || getCategoryName(p.categoryId) }}</span>
                 </td>
                 <td>
-                  <span class="kitchen-tag">
-                    👨‍🍳 {{ p.kitchenName || getKitchenName(p.kitchenId) }}
+                  <span class="kitchen-badge-pill">
+                    {{ getKitchenEmojiForProduct(p) }} {{ p.kitchenName || getKitchenNameForProduct(p) }}
                   </span>
                 </td>
                 <td style="text-align: right;">
-                  <strong class="price-val">{{ p.salePrice | number:'1.0-0' }} so'm</strong>
+                  <strong class="price-val">{{ (p.salePrice || p.price || 0) | number:'1.0-0' }} so'm</strong>
                 </td>
                 <td style="text-align: right; color: var(--text-muted);">
                   {{ (p.purchasePrice || 0) | number:'1.0-0' }} so'm
@@ -115,16 +138,16 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
                   <span class="unit-tag">{{ p.unit || 'dona' }}</span>
                 </td>
                 <td>
-                  <span class="status-badge" [class.active]="p.available" [class.inactive]="!p.available">
-                    {{ p.available ? '● Mavjud' : '○ Tugagan' }}
+                  <span class="status-badge" [class.active]="p.available !== false" [class.inactive]="p.available === false">
+                    {{ p.available !== false ? '● Mavjud' : '○ Tugagan' }}
                   </span>
                 </td>
                 <td style="text-align: right;">
                   <div class="table-actions">
-                    <button class="pos-btn pos-btn--secondary pos-btn--sm" (click)="openEditModal(p)">
+                    <button class="pos-btn pos-btn--secondary pos-btn--sm" title="Tahrirlash" (click)="openEditModal(p)">
                       ✏️
                     </button>
-                    <button class="pos-btn pos-btn--danger pos-btn--sm" (click)="deleteProduct(p)">
+                    <button class="pos-btn pos-btn--danger pos-btn--sm" title="O'chirish" (click)="deleteProduct(p)">
                       🗑️
                     </button>
                   </div>
@@ -146,49 +169,42 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
           </div>
 
           <div class="modal-body form-grid">
+            <!-- KATEGORIYA -->
             <div class="form-group full-width">
-              <label class="form-label">Taom / Mahsulot nomi *</label>
+              <label class="form-label">
+                Kategoriya <span class="required-star">*</span>
+              </label>
+              <select
+                [(ngModel)]="formData.categoryId"
+                class="pos-input"
+                required>
+                <option [ngValue]="''" disabled selected>Kategoriyani tanlang ▼</option>
+                <option *ngFor="let cat of categories" [value]="cat.id">
+                  {{ cat.name }} ({{ cat.kitchenName || getKitchenName(cat.kitchenId) }})
+                </option>
+              </select>
+              <div *ngIf="formData.categoryId && getSelectedCategoryKitchen(formData.categoryId)" class="auto-kitchen-badge">
+                <span class="kitchen-pill">{{ getSelectedCategoryKitchen(formData.categoryId) }}</span>
+                <span class="kitchen-note">Oshxona kategoriya orqali avtomatik aniqlanadi</span>
+              </div>
+            </div>
+
+            <!-- TAOM / MAHSULOT NOMI -->
+            <div class="form-group full-width">
+              <label class="form-label">
+                Taom / Mahsulot nomi <span class="required-star">*</span>
+              </label>
               <input
                 type="text"
                 [(ngModel)]="formData.name"
                 class="pos-input"
-                placeholder="Masalan: Maxsus Palov"
+                placeholder="Masalan: Maxsus Palov, Tandir somsa, Pizza Margarita..."
                 required
               />
             </div>
 
             <div class="form-group">
-              <label class="form-label">Kategoriya *</label>
-              <select [(ngModel)]="formData.categoryId" class="pos-input">
-                <option [ngValue]="undefined">Kategoriyani tanlang</option>
-                <option *ngFor="let cat of categories" [value]="cat.id">
-                  {{ cat.name }}
-                </option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Oshxona (KDS Stansiyasi) *</label>
-              <select [(ngModel)]="formData.kitchenId" class="pos-input" required>
-                <option [ngValue]="undefined">Oshxonani tanlang</option>
-                <option *ngFor="let k of kitchens" [value]="k.id">
-                  {{ k.name }} ({{ k.code }})
-                </option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">SKU / Kod</label>
-              <input
-                type="text"
-                [(ngModel)]="formData.sku"
-                class="pos-input"
-                placeholder="Avtomatik yaratiladi"
-              />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Sotish narxi (so'm) *</label>
+              <label class="form-label">Sotish narxi (so'm) <span class="required-star">*</span></label>
               <input
                 type="number"
                 [(ngModel)]="formData.salePrice"
@@ -218,10 +234,20 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               </select>
             </div>
 
-            <div class="form-group checkbox-group">
+            <div class="form-group">
+              <label class="form-label">SKU / Kod</label>
+              <input
+                type="text"
+                [(ngModel)]="formData.sku"
+                class="pos-input"
+                placeholder="Avtomatik yaratiladi"
+              />
+            </div>
+
+            <div class="form-group full-width checkbox-group">
               <label class="checkbox-label">
                 <input type="checkbox" [(ngModel)]="formData.available" />
-                <span>Menyuda mavjud (Sotuvga ruxsat)</span>
+                <span>Menyuda mavjud (Sotuvga ruxsat berilgan)</span>
               </label>
             </div>
           </div>
@@ -233,7 +259,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
             <button
               class="pos-btn pos-btn--primary"
               (click)="saveProduct()"
-              [disabled]="saving || !formData.name || !formData.salePrice">
+              [disabled]="saving || !formData.name || !formData.categoryId || !formData.salePrice">
               <span>{{ saving ? 'Saqlanmoqda...' : 'Saqlash' }}</span>
             </button>
           </div>
@@ -246,7 +272,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
     .products-page {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
 
     .page-header {
@@ -276,132 +302,177 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
 
     .header-actions {
       display: flex;
-      align-items: center;
       gap: 12px;
+      align-items: center;
     }
 
     .search-box {
       display: flex;
       align-items: center;
-      background: var(--bg-secondary);
+      background: var(--bg-main);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 0 10px;
-      input {
+      border-radius: var(--radius-md);
+      padding: 6px 12px;
+      gap: 8px;
+      min-width: 240px;
+
+      .pos-input {
         border: none;
         background: transparent;
-        color: var(--text-primary);
+        padding: 0;
         font-size: 13px;
-        padding: 8px;
-        outline: none;
-        width: 220px;
+        color: var(--text-primary);
+        width: 100%;
+        &:focus { outline: none; box-shadow: none; }
       }
     }
 
-    /* Category strip */
-    .categories-strip {
+    /* Filters Strips */
+    .filter-strip {
       display: flex;
+      align-items: center;
       gap: 8px;
       overflow-x: auto;
-      padding-bottom: 4px;
+      padding-bottom: 2px;
     }
 
-    .cat-chip {
+    .filter-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+
+    .filter-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
       background: var(--bg-card);
       border: 1px solid var(--border);
+      border-radius: var(--radius-md);
       color: var(--text-secondary);
-      padding: 8px 16px;
-      border-radius: 20px;
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
-      white-space: nowrap;
       transition: all var(--transition);
+      white-space: nowrap;
 
       &:hover {
-        color: var(--text-primary);
         border-color: var(--border-light);
+        color: var(--text-primary);
       }
 
       &.active {
         background: var(--primary);
         color: white;
         border-color: var(--primary);
+        .count-pill {
+          background: rgba(255, 255, 255, 0.25);
+          color: white;
+        }
+      }
+
+      &--sm {
+        padding: 6px 12px;
+        font-size: 12px;
+        border-radius: 20px;
       }
     }
 
-    /* Table Card */
+    .count-pill {
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+    }
+
     .table-card {
       padding: 0;
       overflow: hidden;
     }
 
-    .table-responsive {
-      overflow-x: auto;
-    }
-
     .pos-table {
       width: 100%;
       border-collapse: collapse;
-      text-align: left;
-      font-size: 14px;
+      font-size: 13px;
 
       th {
         background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-weight: 600;
         padding: 12px 16px;
+        font-weight: 600;
+        color: var(--text-secondary);
         border-bottom: 1px solid var(--border);
+        white-space: nowrap;
       }
 
       td {
         padding: 12px 16px;
-        border-bottom: 1px solid var(--divider);
+        border-bottom: 1px solid var(--border);
         color: var(--text-primary);
+        vertical-align: middle;
       }
 
-      tr:hover {
-        background: var(--bg-hover);
+      tr:hover td {
+        background: rgba(var(--primary-rgb), 0.02);
       }
     }
 
     .product-title-cell {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+    }
 
-      .p-icon {
-        font-size: 20px;
-        background: var(--bg-tertiary);
-        padding: 4px;
-        border-radius: 6px;
-      }
+    .p-icon {
+      font-size: 20px;
+    }
 
-      .sub-name {
-        font-size: 12px;
-        color: var(--text-muted);
-      }
+    .sub-name {
+      font-size: 11px;
+      color: var(--text-muted);
     }
 
     .sku-tag {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--primary-light);
-      background: var(--bg-secondary);
-      padding: 2px 6px;
+      font-family: monospace;
+      font-size: 11px;
+      background: var(--bg-tertiary);
+      padding: 3px 6px;
       border-radius: 4px;
+      color: var(--text-secondary);
     }
 
     .cat-tag {
-      background: var(--bg-tertiary);
-      padding: 4px 10px;
-      border-radius: 12px;
+      display: inline-block;
       font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .kitchen-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary-light);
+      background: rgba(var(--primary-rgb), 0.1);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(var(--primary-rgb), 0.2);
     }
 
     .price-val {
-      color: #34d399;
-      font-size: 15px;
+      font-size: 14px;
+      color: var(--primary-light);
     }
 
     .unit-tag {
@@ -410,19 +481,20 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
     }
 
     .status-badge {
-      font-size: 12px;
-      font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
 
       &.active {
-        background: rgba(16, 185, 129, 0.15);
-        color: var(--success);
+        background: rgba(16, 185, 129, 0.12);
+        color: #10b981;
       }
-
       &.inactive {
-        background: rgba(239, 68, 68, 0.15);
-        color: var(--danger);
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
       }
     }
 
@@ -433,9 +505,9 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
     }
 
     .pos-btn--sm {
-      min-height: 32px;
-      padding: 4px 8px;
-      font-size: 13px;
+      min-height: 30px;
+      padding: 2px 8px;
+      font-size: 12px;
     }
 
     /* Modal */
@@ -456,7 +528,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       width: 100%;
-      max-width: 540px;
+      max-width: 520px;
       box-shadow: var(--shadow-lg);
       overflow: hidden;
     }
@@ -491,55 +563,76 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
       gap: 16px;
     }
 
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
     .form-group {
       display: flex;
       flex-direction: column;
       gap: 6px;
-
-      &.full-width {
-        grid-column: span 2;
-      }
     }
 
-    .form-label {
-      font-size: 13px;
-      color: var(--text-secondary);
-      font-weight: 500;
+    .required-star {
+      color: #ef4444;
+      font-weight: bold;
     }
 
-    .checkbox-group {
-      grid-column: span 2;
-      padding-top: 6px;
+    .input-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .error-hint {
+      font-size: 12px;
+      color: #ef4444;
+      margin-top: 2px;
+    }
+
+    .auto-kitchen-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+
+    .kitchen-pill {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary-light);
+      background: rgba(var(--primary-rgb), 0.12);
+      border: 1px solid rgba(var(--primary-rgb), 0.25);
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    .kitchen-note {
+      font-size: 11px;
+      color: var(--text-muted);
     }
 
     .checkbox-label {
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 14px;
-      color: var(--text-primary);
       cursor: pointer;
-
-      input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        accent-color: var(--primary);
-      }
+      font-size: 13px;
+      color: var(--text-primary);
     }
 
     .modal-footer {
       display: flex;
       justify-content: flex-end;
-      gap: 12px;
+      gap: 10px;
       padding: 16px 20px;
       background: var(--bg-tertiary);
       border-top: 1px solid var(--border);
     }
 
     .loading-state, .empty-state {
-      padding: 50px 20px;
       text-align: center;
-      color: var(--text-secondary);
+      padding: 40px 20px;
     }
 
     .empty-icon {
@@ -548,40 +641,28 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
     }
 
     .spinner {
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       border: 3px solid var(--border);
       border-top-color: var(--primary);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
+      margin: 0 auto 16px;
     }
 
-    @keyframes spin {
-      100% { transform: rotate(360deg); }
-    }
-    .kitchen-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: rgba(99, 102, 241, 0.12);
-      color: #818cf8;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   `]
 })
 export class ProductsComponent implements OnInit {
   products: Product[] = [];
   categories: Category[] = [];
   kitchens: KitchenStation[] = [];
-  loading = false;
-  searchQuery = '';
-  selectedCategoryId: string | null = null;
 
-  // Modal
+  selectedKitchenId: string | null = null;
+  selectedCategoryId: string | null = null;
+  searchQuery = '';
+
+  loading = false;
   showModal = false;
   isEditing = false;
   editingId: string | null = null;
@@ -589,7 +670,7 @@ export class ProductsComponent implements OnInit {
 
   formData: CreateProductRequest = {
     name: '',
-    categoryId: undefined,
+    categoryId: '',
     sku: '',
     unit: 'dona',
     salePrice: 0,
@@ -610,24 +691,22 @@ export class ProductsComponent implements OnInit {
 
   loadData(): void {
     this.loading = true;
-    this.cdr.markForCheck();
-
     this.kitchenService.getKitchens().subscribe({
       next: (kRes) => {
         this.kitchens = kRes.data || [];
-        this.cdr.markForCheck();
+        this.loadCategoriesAndProducts();
       },
-      error: (e) => {
-        console.error('Failed to load kitchens', e);
-        this.cdr.markForCheck();
+      error: (err) => {
+        console.error('Failed to load kitchens', err);
+        this.loadCategoriesAndProducts();
       }
     });
+  }
 
+  loadCategoriesAndProducts(): void {
     this.categoryService.getCategories().subscribe({
       next: (catRes) => {
         this.categories = catRes.data || [];
-        this.cdr.markForCheck();
-
         this.productService.getProducts().subscribe({
           next: (prodRes) => {
             this.products = prodRes.data || [];
@@ -649,17 +728,58 @@ export class ProductsComponent implements OnInit {
     });
   }
 
+  selectKitchenFilter(kitchenId: string | null): void {
+    this.selectedKitchenId = kitchenId;
+    // If current category does not belong to the selected kitchen, reset category filter
+    if (kitchenId && this.selectedCategoryId) {
+      const cat = this.categories.find(c => c.id === this.selectedCategoryId);
+      if (!cat || cat.kitchenId !== kitchenId) {
+        this.selectedCategoryId = null;
+      }
+    }
+  }
+
+  get visibleCategories(): Category[] {
+    if (!this.selectedKitchenId) {
+      return this.categories;
+    }
+    return this.categories.filter(c => c.kitchenId === this.selectedKitchenId);
+  }
+
   get filteredProducts(): Product[] {
     return this.products.filter(p => {
+      // 1. Filter by kitchen (derived via category or product.kitchenId)
+      if (this.selectedKitchenId) {
+        const cat = this.categories.find(c => c.id === p.categoryId);
+        const pKitchenId = cat?.kitchenId || p.kitchenId;
+        if (pKitchenId !== this.selectedKitchenId) {
+          return false;
+        }
+      }
+
+      // 2. Filter by category
       if (this.selectedCategoryId && p.categoryId !== this.selectedCategoryId) {
         return false;
       }
+
+      // 3. Search query
       if (this.searchQuery.trim()) {
         const q = this.searchQuery.toLowerCase();
         return p.name.toLowerCase().includes(q) || (p.sku && p.sku.toLowerCase().includes(q));
       }
       return true;
     });
+  }
+
+  getProductsCountForKitchen(kitchenId: string): number {
+    return this.products.filter(p => {
+      const cat = this.categories.find(c => c.id === p.categoryId);
+      return (cat?.kitchenId || p.kitchenId) === kitchenId;
+    }).length;
+  }
+
+  getProductsCountForCategory(categoryId: string): number {
+    return this.products.filter(p => p.categoryId === categoryId).length;
   }
 
   getCategoryName(catId?: string): string {
@@ -674,13 +794,64 @@ export class ProductsComponent implements OnInit {
     return k ? k.name : 'Biriktirilmagan';
   }
 
+  getKitchenNameForProduct(p: Product): string {
+    const cat = this.categories.find(c => c.id === p.categoryId);
+    const kId = cat?.kitchenId || p.kitchenId;
+    if (!kId) return 'Biriktirilmagan';
+    const k = this.kitchens.find(item => item.id === kId);
+    return k ? k.name : 'Biriktirilmagan';
+  }
+
+  getKitchenEmojiForProduct(p: Product): string {
+    const cat = this.categories.find(c => c.id === p.categoryId);
+    const kId = cat?.kitchenId || p.kitchenId;
+    const k = this.kitchens.find(item => item.id === kId);
+    return this.getKitchenEmoji(k?.code);
+  }
+
+  getKitchenEmoji(code?: string): string {
+    if (!code) return '👨‍🍳';
+    switch (code.toUpperCase()) {
+      case 'PALOV': case 'PALOVCHI': return '🥘';
+      case 'SOMSA': case 'SOMSAPAZ': return '🥟';
+      case 'BAR': return '🍹';
+      case 'PIZZA': case 'PITSA': return '🍕';
+      case 'MAIN': case 'MAIN_KITCHEN': return '👨‍🍳';
+      default: return '🍳';
+    }
+  }
+
+  getProductEmoji(name: string, categoryName?: string): string {
+    const n = (name + ' ' + (categoryName || '')).toLowerCase();
+    if (n.includes('osh') || n.includes('palov')) return '🥘';
+    if (n.includes('somsa')) return '🥟';
+    if (n.includes('pitsa') || n.includes('pizza')) return '🍕';
+    if (n.includes('cola') || n.includes('fanta') || n.includes('choy') || n.includes('suv') || n.includes('ichimlik')) return '🍹';
+    if (n.includes('shashlik') || n.includes('kabob')) return '🥩';
+    if (n.includes('manti')) return '🥟';
+    if (n.includes('salat')) return '🥗';
+    if (n.includes('shorva') || n.includes("sho'rva")) return '🍲';
+    return '🍽️';
+  }
+
+  getSelectedCategoryKitchen(categoryId?: string): string {
+    if (!categoryId) return '';
+    const cat = this.categories.find(c => c.id === categoryId);
+    if (!cat) return '';
+    const kitchenName = cat.kitchenName || this.getKitchenName(cat.kitchenId);
+    const emoji = this.getKitchenEmoji(cat.kitchenCode);
+    return `${emoji} Oshxona: ${kitchenName}`;
+  }
+
   openCreateModal(): void {
     this.isEditing = false;
     this.editingId = null;
+
+    const defaultCatId = this.selectedCategoryId || (this.categories.length > 0 ? this.categories[0].id : '');
+
     this.formData = {
       name: '',
-      categoryId: this.selectedCategoryId || (this.categories.length > 0 ? this.categories[0].id : undefined),
-      kitchenId: this.kitchens.length > 0 ? this.kitchens[0].id : undefined,
+      categoryId: defaultCatId,
       sku: 'SKU-' + Math.floor(1000 + Math.random() * 9000),
       unit: 'dona',
       salePrice: 0,
@@ -693,10 +864,10 @@ export class ProductsComponent implements OnInit {
   openEditModal(p: Product): void {
     this.isEditing = true;
     this.editingId = p.id;
+
     this.formData = {
       name: p.name,
       categoryId: p.categoryId,
-      kitchenId: p.kitchenId,
       sku: p.sku,
       unit: p.unit || 'dona',
       salePrice: p.salePrice || p.price || 0,
@@ -715,8 +886,8 @@ export class ProductsComponent implements OnInit {
       alert('Iltimos, mahsulot nomi va sotish narxini kiriting!');
       return;
     }
-    if (!this.formData.kitchenId) {
-      alert('Iltimos, mahsulot tayyorlanadigan oshxonani tanlang!');
+    if (!this.formData.categoryId) {
+      alert('Iltimos, mahsulot uchun kategoriyani tanlang! Mahsulot qat\'iy kategoriya orqali oshxonaga bog\'lanadi.');
       return;
     }
 
@@ -726,7 +897,7 @@ export class ProductsComponent implements OnInit {
         next: () => {
           this.saving = false;
           this.closeModal();
-          this.loadData();
+          this.loadCategoriesAndProducts();
         },
         error: (err) => {
           this.saving = false;
@@ -738,7 +909,7 @@ export class ProductsComponent implements OnInit {
         next: () => {
           this.saving = false;
           this.closeModal();
-          this.loadData();
+          this.loadCategoriesAndProducts();
         },
         error: (err) => {
           this.saving = false;
@@ -754,7 +925,7 @@ export class ProductsComponent implements OnInit {
     }
     this.productService.deleteProduct(p.id).subscribe({
       next: () => {
-        this.loadData();
+        this.loadCategoriesAndProducts();
       },
       error: (err) => alert('O‘chirishda xatolik: ' + (err.error?.message || err.message))
     });

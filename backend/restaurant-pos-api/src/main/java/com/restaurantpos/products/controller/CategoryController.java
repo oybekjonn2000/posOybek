@@ -25,11 +25,12 @@ public class CategoryController {
     private final CategoryService categoryService;
 
     @GetMapping
-    @Operation(summary = "Get all categories")
+    @Operation(summary = "Get all categories, optionally filtered by kitchenId")
     public ResponseEntity<ApiResponse<List<CategoryDto.Response>>> getCategories(
             @AuthenticationPrincipal UserPrincipal user,
-            @RequestParam(required = false, defaultValue = "false") boolean activeOnly) {
-        List<CategoryDto.Response> categories = categoryService.getAllCategories(user.getTenantId(), activeOnly);
+            @RequestParam(required = false, defaultValue = "false") boolean activeOnly,
+            @RequestParam(required = false) UUID kitchenId) {
+        List<CategoryDto.Response> categories = categoryService.getAllCategories(user.getTenantId(), activeOnly, kitchenId);
         return ResponseEntity.ok(ApiResponse.success(categories));
     }
 

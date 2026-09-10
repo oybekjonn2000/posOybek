@@ -15,6 +15,12 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
 
     List<Category> findByTenantIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc(UUID tenantId);
 
+    List<Category> findByTenantIdAndKitchenIdAndDeletedAtIsNullOrderBySortOrderAsc(UUID tenantId, UUID kitchenId);
+
+    List<Category> findByTenantIdAndKitchenIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc(UUID tenantId, UUID kitchenId);
+
+    long countByTenantIdAndKitchenIdAndDeletedAtIsNull(UUID tenantId, UUID kitchenId);
+
     Optional<Category> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
 
     boolean existsByTenantIdAndNameIgnoreCaseAndDeletedAtIsNull(UUID tenantId, String name);

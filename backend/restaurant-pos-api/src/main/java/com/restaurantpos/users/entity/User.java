@@ -23,6 +23,10 @@ public class User extends BaseEntity {
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "kitchen_id")
+    private com.restaurantpos.kitchen.entity.Kitchen kitchen;
+
     @Column(name = "username", nullable = false, length = 100)
     private String username;
 

@@ -37,6 +37,18 @@ public class Kitchen {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    @Column(name = "color", length = 30)
+    private String color = "#6366F1";
+
+    @Column(name = "auto_print", nullable = false)
+    private boolean autoPrint = true;
+
+    @Column(name = "sound_notification", nullable = false)
+    private boolean soundNotification = true;
+
+    @Column(name = "preparation_time_minutes")
+    private Integer preparationTimeMinutes = 15;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 

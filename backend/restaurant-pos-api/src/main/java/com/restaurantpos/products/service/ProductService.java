@@ -66,22 +66,24 @@ public class ProductService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> PosException.notFound("Tenant not found"));
 
-        Category category = null;
-        if (request.getCategoryId() != null) {
-            category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getCategoryId(), tenantId)
-                    .orElseThrow(() -> PosException.notFound("Category not found"));
+        if (request.getCategoryId() == null) {
+            throw PosException.badRequest("Kategoriya tanlanishi shart. Mahsulot faqat kategoriya orqali oshxonaga bog'lanadi.");
         }
 
-        com.restaurantpos.kitchen.entity.Kitchen kitchen = null;
-        if (request.getKitchenId() != null) {
-            kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
-                    .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi"));
+        Category category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getCategoryId(), tenantId)
+                .orElseThrow(() -> PosException.badRequest("Tanlangan kategoriya topilmadi"));
+
+        if (!category.isActive()) {
+            throw PosException.badRequest("Tanlangan kategoriya faol emas. Faqat faol kategoriyaga mahsulot qo'shish mumkin.");
+        }
+
+        if (category.getKitchen() == null) {
+            throw PosException.badRequest("Tanlangan kategoriyaga oshxona biriktirilmagan");
         }
 
         Product product = new Product();
         product.setTenant(tenant);
-        product.setCategory(category);
-        product.setKitchen(kitchen);
+        product.setCategory(category); // Automatically sets product.kitchen = category.getKitchen()
         product.setSku(request.getSku());
         product.setBarcode(request.getBarcode());
         product.setName(request.getName());
@@ -117,14 +119,14 @@ public class ProductService {
 
         if (request.getCategoryId() != null) {
             Category category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getCategoryId(), tenantId)
-                    .orElseThrow(() -> PosException.notFound("Category not found"));
-            product.setCategory(category);
-        }
-
-        if (request.getKitchenId() != null) {
-            com.restaurantpos.kitchen.entity.Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
-                    .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi"));
-            product.setKitchen(kitchen);
+                    .orElseThrow(() -> PosException.badRequest("Tanlangan kategoriya topilmadi"));
+            if (!category.isActive()) {
+                throw PosException.badRequest("Tanlangan kategoriya faol emas.");
+            }
+            if (category.getKitchen() == null) {
+                throw PosException.badRequest("Tanlangan kategoriyaga oshxona biriktirilmagan");
+            }
+            product.setCategory(category); // Automatically updates product.kitchen to match the new category's kitchen!
         }
 
         if (request.getSku() != null) product.setSku(request.getSku());

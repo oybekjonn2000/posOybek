@@ -86,14 +86,19 @@ import { WebsocketService } from '../core/services/websocket.service';
           @for (table of filteredTables(); track table.id) {
             <div class="table-card" 
                  [class.table-card--free]="table.status === 'FREE'"
-                 [class.table-card--occupied]="table.status === 'OCCUPIED'"
+                 [class.table-card--occupied]="table.status === 'OCCUPIED' && table.myTable !== false"
+                 [class.table-card--other-waiter]="table.status === 'OCCUPIED' && table.myTable === false"
                  (click)="onSelectTable(table)">
               
               <div class="table-card__header">
                 <span class="table-card__number">#{{ table.tableNumber }}</span>
-                <span class="table-status-badge" [class.badge--free]="table.status === 'FREE'" [class.badge--occupied]="table.status === 'OCCUPIED'">
-                  {{ table.status === 'FREE' ? 'BOʻSH' : 'BAND' }}
-                </span>
+                @if (table.status === 'FREE') {
+                  <span class="table-status-badge badge--free">BOʻSH</span>
+                } @else if (table.myTable === false) {
+                  <span class="table-status-badge badge--other-waiter">🔒 BAND (Boshqa ofitsiant)</span>
+                } @else {
+                  <span class="table-status-badge badge--occupied">BAND (Mening stolim)</span>
+                }
               </div>
 
               <!-- Zone Badge -->
@@ -105,13 +110,18 @@ import { WebsocketService } from '../core/services/websocket.service';
 
               <div class="table-card__body">
                 <div class="table-card__icon">
-                  {{ table.status === 'FREE' ? '🟢' : '🔴' }}
+                  {{ table.status === 'FREE' ? '🟢' : (table.myTable === false ? '🔒' : '🔴') }}
                 </div>
                 <div class="table-card__name">{{ table.name }}</div>
 
                 @if (table.status === 'FREE') {
                   <div class="table-card__capacity">
                     <span>👥 {{ table.capacity }} kishilik</span>
+                  </div>
+                } @else if (table.myTable === false) {
+                  <div class="table-card__other-waiter-info">
+                    <span class="other-waiter-badge">👤 Boshqa ofitsiant</span>
+                    <p class="other-waiter-hint">Bu stol boshqa ofitsantga biriktirilgan</p>
                   </div>
                 } @else {
                   <div class="table-card__active-order">
@@ -129,6 +139,10 @@ import { WebsocketService } from '../core/services/websocket.service';
                 @if (table.status === 'FREE') {
                   <button class="btn-action btn-action--order">
                     ➕ Buyurtma ochish
+                  </button>
+                } @else if (table.myTable === false) {
+                  <button class="btn-action btn-action--blocked" disabled title="Bu stol boshqa ofitsantga biriktirilgan">
+                    🚫 Biriktirilgan
                   </button>
                 } @else {
                   <button class="btn-action btn-action--view">
@@ -353,6 +367,18 @@ import { WebsocketService } from '../core/services/websocket.service';
         &:hover { border-color: var(--danger); }
       }
 
+      &--other-waiter {
+        border-color: rgba(245, 158, 11, 0.4);
+        background: rgba(245, 158, 11, 0.04);
+        cursor: not-allowed;
+        opacity: 0.9;
+        &:hover {
+          transform: none;
+          box-shadow: none;
+          border-color: rgba(239, 68, 68, 0.6);
+        }
+      }
+
       &__header {
         display: flex;
         justify-content: space-between;
@@ -427,6 +453,27 @@ import { WebsocketService } from '../core/services/websocket.service';
         letter-spacing: 0.3px;
       }
 
+      &__other-waiter-info {
+        margin-top: 8px;
+        padding: 8px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px dashed rgba(245, 158, 11, 0.3);
+        border-radius: var(--radius-md);
+        text-align: center;
+      }
+      .other-waiter-badge {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 700;
+        color: #f59e0b;
+        margin-bottom: 2px;
+      }
+      .other-waiter-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin: 0;
+      }
+
       &__footer {
         margin-top: 12px;
         padding-top: 12px;
@@ -449,6 +496,11 @@ import { WebsocketService } from '../core/services/websocket.service';
       background: rgba(239, 68, 68, 0.15);
       color: #ef4444;
     }
+    .badge--other-waiter {
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
 
     .btn-action {
       width: 100%;
@@ -470,6 +522,12 @@ import { WebsocketService } from '../core/services/websocket.service';
         background: rgba(239, 68, 68, 0.15);
         color: #ef4444;
         &:hover { background: #ef4444; color: white; }
+      }
+
+      &--blocked {
+        background: rgba(148, 163, 184, 0.15);
+        color: var(--text-muted);
+        cursor: not-allowed;
       }
     }
 
@@ -769,6 +827,35 @@ export class TablesComponent implements OnInit, OnDestroy {
   }
 
   onSelectTable(table: RestaurantTable): void {
+    if (table.status === 'OCCUPIED' && table.myTable === false) {
+      this.notify.warning("Bu stol boshqa ofitsantga biriktirilgan.");
+      return;
+    }
+
+    if (table.status === 'FREE') {
+      this.tableService.occupyTable(table.id).subscribe({
+        next: (res) => {
+          if (res.success && res.data) {
+            const occupied = res.data;
+            this.router.navigate(['/pos'], {
+              queryParams: {
+                tableId: occupied.id,
+                tableNumber: occupied.tableNumber,
+                tableName: occupied.name,
+                orderId: occupied.currentOrderId
+              }
+            });
+          }
+        },
+        error: (err) => {
+          const msg = err.error?.message || "Bu stol boshqa ofitsantga biriktirilgan.";
+          this.notify.error(msg);
+          this.loadTables();
+        }
+      });
+      return;
+    }
+
     this.router.navigate(['/pos'], {
       queryParams: {
         tableId: table.id,

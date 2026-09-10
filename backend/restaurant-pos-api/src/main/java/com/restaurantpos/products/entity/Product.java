@@ -104,4 +104,18 @@ public class Product extends BaseEntity {
     public boolean isLowStock() {
         return trackStock && currentStock.compareTo(minStockLevel) <= 0;
     }
+
+    public com.restaurantpos.kitchen.entity.Kitchen getKitchen() {
+        if (category != null && category.getKitchen() != null) {
+            return category.getKitchen();
+        }
+        return this.kitchen;
+    }
+
+    public void setCategory(Category category) {
+        this.category = category;
+        if (category != null && category.getKitchen() != null) {
+            this.kitchen = category.getKitchen();
+        }
+    }
 }

@@ -71,15 +71,17 @@ public class AuthDto {
         private final String fullName;
         private final String tenantId;
         private final String role;
+        private final String kitchenId;
         private final java.util.Set<String> permissions;
 
         public UserInfo(String id, String username, String fullName, String tenantId,
-                        String role, java.util.Set<String> permissions) {
+                        String role, String kitchenId, java.util.Set<String> permissions) {
             this.id = id;
             this.username = username;
             this.fullName = fullName;
             this.tenantId = tenantId;
             this.role = role;
+            this.kitchenId = kitchenId;
             this.permissions = permissions;
         }
     }

@@ -59,6 +59,10 @@ public class RestaurantTable extends BaseEntity {
     @Column(name = "current_order_id")
     private UUID currentOrderId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "waiter_id")
+    private com.restaurantpos.users.entity.User waiter;
+
     public enum TableStatus {
         FREE, OCCUPIED, RESERVED, BILL_REQUESTED, CLEANING
     }

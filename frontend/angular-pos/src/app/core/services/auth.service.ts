@@ -24,6 +24,7 @@ export interface UserInfo {
   fullName: string;
   tenantId: string;
   role?: string;
+  kitchenId?: string;
   permissions: string[];
 }
 
@@ -51,6 +52,14 @@ export class AuthService {
   readonly accessToken = this._accessToken.asReadonly();
   readonly isAuthenticated = computed(() => !!this._user() && !!this._accessToken());
   readonly permissions = computed(() => new Set(this._user()?.permissions ?? []));
+  readonly isAdmin = computed(() => {
+    const role = (this._user()?.role || '').toUpperCase();
+    return role === 'ADMIN' || this._user()?.username === 'admin';
+  });
+
+  isAdminUser(): boolean {
+    return this.isAdmin();
+  }
 
   constructor(private http: HttpClient, private router: Router) {}
 

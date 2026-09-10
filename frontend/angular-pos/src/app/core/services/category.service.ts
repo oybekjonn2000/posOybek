@@ -7,6 +7,9 @@ import { ApiResponse } from './auth.service';
 export interface Category {
   id: string;
   name: string;
+  kitchenId: string;
+  kitchenName?: string;
+  kitchenCode?: string;
   nameUz?: string;
   nameRu?: string;
   icon?: string;
@@ -18,11 +21,13 @@ export interface Category {
 
 export interface CreateCategoryRequest {
   name: string;
+  kitchenId: string;
   nameUz?: string;
   nameRu?: string;
   icon?: string;
   color?: string;
   sortOrder?: number;
+  active?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -31,8 +36,11 @@ export class CategoryService {
 
   constructor(private http: HttpClient) {}
 
-  getCategories(activeOnly: boolean = false): Observable<ApiResponse<Category[]>> {
-    const params = new HttpParams().set('activeOnly', activeOnly.toString());
+  getCategories(activeOnly: boolean = false, kitchenId?: string): Observable<ApiResponse<Category[]>> {
+    let params = new HttpParams().set('activeOnly', activeOnly.toString());
+    if (kitchenId) {
+      params = params.set('kitchenId', kitchenId);
+    }
     return this.http.get<ApiResponse<Category[]>>(this.API, { params });
   }
 

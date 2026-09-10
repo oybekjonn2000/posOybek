@@ -33,6 +33,7 @@ import { Order, OrderItem } from '../core/services/order.service';
             </div>
           </div>
           <p class="kds-subtitle">
+            <span *ngIf="selectedKitchen">Stansiya: <strong>{{ selectedKitchen.name }} ({{ selectedKitchen.code }})</strong> • </span>
             Har bir stansiya faqat o'z taomlarini ko'radi • Hech qanday sahifani yangilash (refresh) shart emas
           </p>
         </div>

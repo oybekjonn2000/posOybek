@@ -1,16 +1,18 @@
 package com.restaurantpos.products.service;
 
 import com.restaurantpos.common.exception.PosException;
+import com.restaurantpos.kitchen.entity.Kitchen;
+import com.restaurantpos.kitchen.repository.KitchenRepository;
 import com.restaurantpos.products.dto.CategoryDto;
 import com.restaurantpos.products.entity.Category;
 import com.restaurantpos.products.repository.CategoryRepository;
+import com.restaurantpos.products.repository.ProductRepository;
 import com.restaurantpos.tenants.entity.Tenant;
 import com.restaurantpos.tenants.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -21,12 +23,26 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final TenantRepository tenantRepository;
+    private final KitchenRepository kitchenRepository;
+    private final ProductRepository productRepository;
 
     @Transactional(readOnly = true)
     public List<CategoryDto.Response> getAllCategories(UUID tenantId, boolean activeOnly) {
-        List<Category> categories = activeOnly
-                ? categoryRepository.findByTenantIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc(tenantId)
-                : categoryRepository.findByTenantIdAndDeletedAtIsNullOrderBySortOrderAsc(tenantId);
+        return getAllCategories(tenantId, activeOnly, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CategoryDto.Response> getAllCategories(UUID tenantId, boolean activeOnly, UUID kitchenId) {
+        List<Category> categories;
+        if (kitchenId != null) {
+            categories = activeOnly
+                    ? categoryRepository.findByTenantIdAndKitchenIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc(tenantId, kitchenId)
+                    : categoryRepository.findByTenantIdAndKitchenIdAndDeletedAtIsNullOrderBySortOrderAsc(tenantId, kitchenId);
+        } else {
+            categories = activeOnly
+                    ? categoryRepository.findByTenantIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc(tenantId)
+                    : categoryRepository.findByTenantIdAndDeletedAtIsNullOrderBySortOrderAsc(tenantId);
+        }
 
         return categories.stream().map(this::toResponse).collect(Collectors.toList());
     }
@@ -44,8 +60,15 @@ public class CategoryService {
             throw PosException.badRequest("Category with name '" + request.getName() + "' already exists");
         }
 
+        if (request.getKitchenId() == null) {
+            throw PosException.badRequest("Oshxona tanlanishi kerak");
+        }
+
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> PosException.notFound("Tenant not found"));
+
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
+                .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi: " + request.getKitchenId()));
 
         Category parent = null;
         if (request.getParentId() != null) {
@@ -55,7 +78,8 @@ public class CategoryService {
 
         Category category = new Category();
         category.setTenant(tenant);
-        category.setName(request.getName());
+        category.setKitchen(kitchen);
+        category.setName(request.getName().trim());
         category.setNameUz(request.getNameUz());
         category.setNameRu(request.getNameRu());
         category.setNameEn(request.getNameEn());
@@ -76,7 +100,13 @@ public class CategoryService {
         Category category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Category not found: " + id));
 
-        if (request.getName() != null) category.setName(request.getName());
+        if (request.getKitchenId() != null) {
+            Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
+                    .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi: " + request.getKitchenId()));
+            category.setKitchen(kitchen);
+        }
+
+        if (request.getName() != null) category.setName(request.getName().trim());
         if (request.getNameUz() != null) category.setNameUz(request.getNameUz());
         if (request.getNameRu() != null) category.setNameRu(request.getNameRu());
         if (request.getNameEn() != null) category.setNameEn(request.getNameEn());
@@ -101,13 +131,27 @@ public class CategoryService {
     public void deleteCategory(UUID id, UUID tenantId) {
         Category category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Category not found: " + id));
+
+        long productCount = productRepository.countByTenantIdAndCategoryIdAndDeletedAtIsNull(tenantId, id);
+        if (productCount > 0) {
+            throw PosException.badRequest("Bu kategoriyaga " + productCount + " ta mahsulot bog'langan. Avval ularni boshqa kategoriyaga ko'chiring yoki faolsizlantiring.");
+        }
+
         category.softDelete();
         categoryRepository.save(category);
     }
 
     private CategoryDto.Response toResponse(Category category) {
+        UUID kId = category.getKitchen() != null ? category.getKitchen().getId() : null;
+        String kName = category.getKitchen() != null ? category.getKitchen().getName() : null;
+        String kCode = category.getKitchen() != null ? category.getKitchen().getCode() : null;
+        int pCount = (int) productRepository.countByTenantIdAndCategoryIdAndDeletedAtIsNull(category.getTenant().getId(), category.getId());
+
         return CategoryDto.Response.builder()
                 .id(category.getId())
+                .kitchenId(kId)
+                .kitchenName(kName)
+                .kitchenCode(kCode)
                 .name(category.getName())
                 .nameUz(category.getNameUz())
                 .nameRu(category.getNameRu())
@@ -119,6 +163,7 @@ public class CategoryService {
                 .sortOrder(category.getSortOrder())
                 .active(category.isActive())
                 .parentId(category.getParent() != null ? category.getParent().getId() : null)
+                .productCount(pCount)
                 .createdAt(category.getCreatedAt())
                 .build();
     }

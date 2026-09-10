@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 import { OrderService, Order, OrderItem, CancellationReceipt } from '../../core/services/order.service';
 import { PaymentService, PaymentProcessRequest } from '../../core/services/payment.service';
 import { TableService, RestaurantTable } from '../../core/services/table.service';
+import { AuthService } from '../../core/services/auth.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -190,7 +191,7 @@ import { TableService, RestaurantTable } from '../../core/services/table.service
 
                       <!-- Payment Button (Cashier) -->
                       <button
-                        *ngIf="order.status !== 'PAID' && order.status !== 'CANCELLED'"
+                        *ngIf="canProcessPayment() && order.status !== 'PAID' && order.status !== 'CANCELLED'"
                         class="pos-btn pos-btn--success pos-btn--sm"
                         title="To'lovni qabul qilish"
                         (click)="openPaymentModal(order)">
@@ -422,7 +423,7 @@ import { TableService, RestaurantTable } from '../../core/services/table.service
               </button>
               <button class="pos-btn pos-btn--secondary" (click)="closeModals()">Yopish</button>
               <button
-                *ngIf="selectedOrder.status !== 'PAID' && selectedOrder.status !== 'CANCELLED'"
+                *ngIf="canProcessPayment() && selectedOrder.status !== 'PAID' && selectedOrder.status !== 'CANCELLED'"
                 class="pos-btn pos-btn--success"
                 (click)="showDetailModal = false; openPaymentModal(selectedOrder)">
                 💳 To'lovga o'tish
@@ -1839,8 +1840,19 @@ export class OrdersListComponent implements OnInit {
     private orderService: OrderService,
     private paymentService: PaymentService,
     private tableService: TableService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    public auth: AuthService
   ) {}
+
+  canProcessPayment(): boolean {
+    const user = this.auth.user();
+    const role = (user?.role || '').toUpperCase();
+    const username = (user?.username || '').toLowerCase();
+    if (role === 'WAITER' || username === 'waiter') {
+      return false;
+    }
+    return this.auth.hasPermission('PROCESS_PAYMENT') || role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER';
+  }
 
   ngOnInit(): void {
     this.loadOrders();
@@ -2066,6 +2078,10 @@ export class OrdersListComponent implements OnInit {
   }
 
   openPaymentModal(order: Order): void {
+    if (!this.canProcessPayment()) {
+      alert("Ofitsiant to'lov qabul qila olmaydi. To'lov faqat Kassa orqali amalga oshiriladi!");
+      return;
+    }
     this.selectedOrder = order;
     this.payMethod = 'CASH';
     const total = order.total || order.subtotal || 0;

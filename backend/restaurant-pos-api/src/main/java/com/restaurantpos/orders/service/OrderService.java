@@ -42,12 +42,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrderService {
 
     private final OrderRepository orderRepository;
@@ -63,20 +65,42 @@ public class OrderService {
     private final ShiftRepository shiftRepository;
     private final com.restaurantpos.kitchen.repository.KitchenTicketRepository kitchenTicketRepository;
     private final com.restaurantpos.common.websocket.WebSocketNotificationService wsNotification;
+    private final com.restaurantpos.printers.service.PrintRoutingService printRoutingService;
 
     private static final AtomicInteger ORDER_COUNTER = new AtomicInteger(100);
     private static final AtomicInteger CANCEL_COUNTER = new AtomicInteger(100);
 
     @Transactional(readOnly = true)
     public List<OrderDto.Response> getActiveOrders(UUID tenantId) {
-        return orderRepository.findActiveOrders(tenantId).stream()
+        return getActiveOrders(tenantId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderDto.Response> getActiveOrders(UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user) {
+        List<Order> orders;
+        if (user != null && user.isWaiter()) {
+            orders = orderRepository.findActiveOrdersByWaiter(tenantId, user.getUserId());
+        } else {
+            orders = orderRepository.findActiveOrders(tenantId);
+        }
+        return orders.stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<OrderDto.Response> getOrderHistory(UUID tenantId, UUID tableId, String paymentMethod, String search) {
-        List<Order> orders = orderRepository.findHistoryOrders(tenantId);
+        return getOrderHistory(tenantId, tableId, paymentMethod, search, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderDto.Response> getOrderHistory(UUID tenantId, UUID tableId, String paymentMethod, String search, com.restaurantpos.auth.security.UserPrincipal user) {
+        List<Order> orders;
+        if (user != null && user.isWaiter()) {
+            orders = orderRepository.findHistoryOrdersByWaiter(tenantId, user.getUserId());
+        } else {
+            orders = orderRepository.findHistoryOrders(tenantId);
+        }
         return orders.stream()
                 .filter(o -> {
                     if (tableId != null && (o.getTable() == null || !tableId.equals(o.getTable().getId()))) {
@@ -101,6 +125,14 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
+    public void validateOrderOwnership(Order order, com.restaurantpos.auth.security.UserPrincipal user) {
+        if (user != null && user.isWaiter()) {
+            if (order.getWaiter() != null && !order.getWaiter().getId().equals(user.getUserId())) {
+                throw PosException.forbidden("Bu buyurtma boshqa ofitsantga tegishli!");
+            }
+        }
+    }
+
     public TableDto.Response toTableResponse(RestaurantTable table, Order activeOrder) {
         String activeOrderNumber = null;
         Integer itemCount = 0;
@@ -116,6 +148,9 @@ public class OrderService {
                     : 0;
             totalAmount = activeOrder.getTotal() != null ? activeOrder.getTotal() : (activeOrder.getSubtotal() != null ? activeOrder.getSubtotal() : BigDecimal.ZERO);
         }
+
+        UUID waiterId = table.getWaiter() != null ? table.getWaiter().getId() : null;
+        String waiterName = table.getWaiter() != null ? (table.getWaiter().getFirstName() + " " + (table.getWaiter().getLastName() != null ? table.getWaiter().getLastName() : "")).trim() : null;
 
         return TableDto.Response.builder()
                 .id(table.getId())
@@ -134,14 +169,24 @@ public class OrderService {
                 .activeOrderNumber(activeOrderNumber)
                 .itemCount(itemCount)
                 .totalAmount(totalAmount)
+                .waiterId(waiterId)
+                .waiterName(waiterName)
+                .myTable(true)
                 .active(table.isActive())
                 .build();
     }
 
+
     @Transactional(readOnly = true)
     public OrderDto.Response getOrderById(UUID id, UUID tenantId) {
+        return getOrderById(id, tenantId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderDto.Response getOrderById(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + id));
+        validateOrderOwnership(order, user);
         return toResponse(order);
     }
 
@@ -155,8 +200,14 @@ public class OrderService {
 
         RestaurantTable table = null;
         if (request.getTableId() != null) {
-            table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getTableId(), tenantId)
+            table = tableRepository.findByIdWithLock(request.getTableId(), tenantId)
                     .orElseThrow(() -> PosException.notFound("Table not found"));
+
+            boolean isWaiter = user.getRoles() != null && user.getRoles().stream()
+                    .anyMatch(r -> "WAITER".equalsIgnoreCase(r.getName()));
+            if (isWaiter && table.getWaiter() != null && !table.getWaiter().getId().equals(user.getId())) {
+                throw PosException.forbidden("Bu stol boshqa ofitsantga biriktirilgan.");
+            }
         }
 
         Customer customer = null;
@@ -191,9 +242,10 @@ public class OrderService {
 
         Order saved = orderRepository.save(order);
 
-        // If table assigned, mark table as OCCUPIED
+        // If table assigned, mark table as OCCUPIED and bind to waiter
         if (table != null) {
             table.setStatus(RestaurantTable.TableStatus.OCCUPIED);
+            table.setWaiter(user);
             table.setCurrentOrderId(saved.getId());
             tableRepository.save(table);
         }
@@ -208,8 +260,14 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response addItemsToOrder(UUID orderId, UUID tenantId, OrderDto.AddItemsRequest request) {
+        return addItemsToOrder(orderId, tenantId, null, request);
+    }
+
+    @Transactional
+    public OrderDto.Response addItemsToOrder(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, OrderDto.AddItemsRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+        validateOrderOwnership(order, user);
 
         if (order.getStatus() == Order.OrderStatus.PAID || order.getStatus() == Order.OrderStatus.CANCELLED) {
             throw PosException.badRequest("Cannot add items to " + order.getStatus() + " order");
@@ -231,8 +289,14 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response voidOrderItem(UUID orderId, UUID itemId, UUID userId, UUID tenantId, OrderDto.VoidItemRequest request) {
+        return voidOrderItem(orderId, itemId, userId, tenantId, null, request);
+    }
+
+    @Transactional
+    public OrderDto.Response voidOrderItem(UUID orderId, UUID itemId, UUID userId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal userPrincipal, OrderDto.VoidItemRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+        validateOrderOwnership(order, userPrincipal);
 
         OrderItem item = order.getItems().stream()
                 .filter(i -> i.getId().equals(itemId))
@@ -256,8 +320,14 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response applyDiscount(UUID orderId, UUID tenantId, OrderDto.ApplyDiscountRequest request) {
+        return applyDiscount(orderId, tenantId, null, request);
+    }
+
+    @Transactional
+    public OrderDto.Response applyDiscount(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, OrderDto.ApplyDiscountRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+        validateOrderOwnership(order, user);
 
         if (request.getPercent() != null) {
             order.setDiscountPercent(request.getPercent());
@@ -276,8 +346,14 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response updateOrderStatus(UUID orderId, UUID tenantId, OrderDto.UpdateStatusRequest request) {
+        return updateOrderStatus(orderId, tenantId, null, request);
+    }
+
+    @Transactional
+    public OrderDto.Response updateOrderStatus(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, OrderDto.UpdateStatusRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+        validateOrderOwnership(order, user);
 
         String s = request.getStatus().toUpperCase();
         if ("SENT_TO_KITCHEN".equals(s)) s = "IN_PROGRESS";
@@ -294,6 +370,7 @@ public class OrderService {
                 RestaurantTable table = order.getTable();
                 table.setStatus(RestaurantTable.TableStatus.FREE);
                 table.setCurrentOrderId(null);
+                table.setWaiter(null);
                 tableRepository.save(table);
             }
         }
@@ -301,6 +378,7 @@ public class OrderService {
         Order saved = orderRepository.save(order);
         return toResponse(saved);
     }
+
 
     private OrderItem buildOrderItem(Order order, OrderDto.ItemRequest req, UUID tenantId) {
         Product product = productRepository.findByIdAndTenantIdAndDeletedAtIsNull(req.getProductId(), tenantId)
@@ -413,12 +491,19 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response sendNewItemsToKitchen(UUID orderId, UUID tenantId, OrderDto.SendToKitchenRequest request) {
+        return sendNewItemsToKitchen(orderId, tenantId, null, request);
+    }
+
+    @Transactional
+    public OrderDto.Response sendNewItemsToKitchen(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, OrderDto.SendToKitchenRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
+        validateOrderOwnership(order, user);
 
         if (order.getStatus() == Order.OrderStatus.PAID || order.getStatus() == Order.OrderStatus.CANCELLED) {
             throw PosException.badRequest("Cannot send items for " + order.getStatus() + " order");
         }
+
 
         // 1. If request has new items, build and add them with status NEW
         if (request != null && request.getItems() != null && !request.getItems().isEmpty()) {
@@ -461,6 +546,13 @@ public class OrderService {
             // Targeted WebSocket notification: ONLY newly sent items for this specific kitchen
             OrderDto.Response kitchenPayload = buildKitchenOrderPayload(order, kitchen.getId(), kitchenItems);
             wsNotification.notifyKitchenNewTicket(kitchen.getId(), kitchenPayload);
+        }
+
+        // Hardware Print Routing: dispatch to assigned kitchen printers
+        try {
+            printRoutingService.routeAndPrintKitchenTickets(order, itemsToSend);
+        } catch (Exception pex) {
+            log.warn("Printer dispatch warning: {}", pex.getMessage());
         }
 
         // 4. Transition newly sent items: NEW -> SENT_TO_KITCHEN
@@ -527,6 +619,13 @@ public class OrderService {
             // WebSocket event: Har bir oshxona kanaliga (/topic/kitchen/{kitchenId}) FAQAT YANGI taomlar yuboriladi!
             OrderDto.Response kitchenPayload = buildKitchenOrderPayload(order, kitchen.getId(), kitchenItems);
             wsNotification.notifyKitchenNewTicket(kitchen.getId(), kitchenPayload);
+        }
+
+        // Hardware Print Routing: dispatch to assigned kitchen printers
+        try {
+            printRoutingService.routeAndPrintKitchenTickets(order, newItems);
+        } catch (Exception pex) {
+            log.warn("Printer dispatch warning: {}", pex.getMessage());
         }
 
         // Mark routed items as SENT_TO_KITCHEN
@@ -604,8 +703,15 @@ public class OrderService {
     @Transactional
     public CancellationReceiptDto.CancellationResult cancelOrderItem(
             UUID orderId, UUID itemId, UUID userId, UUID tenantId, CancellationReceiptDto.CancelItemRequest request) {
+        return cancelOrderItem(orderId, itemId, userId, tenantId, null, request);
+    }
+
+    @Transactional
+    public CancellationReceiptDto.CancellationResult cancelOrderItem(
+            UUID orderId, UUID itemId, UUID userId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal userPrincipal, CancellationReceiptDto.CancelItemRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
+        validateOrderOwnership(order, userPrincipal);
 
         if (order.getStatus() == Order.OrderStatus.PAID) {
             throw PosException.badRequest("To'langan buyurtma mahsulotini bekor qilib bo'lmaydi!");
@@ -685,10 +791,12 @@ public class OrderService {
                 RestaurantTable table = order.getTable();
                 table.setStatus(RestaurantTable.TableStatus.FREE);
                 table.setCurrentOrderId(null);
+                table.setWaiter(null);
                 tableRepository.save(table);
                 wsNotification.notifyTableStatusChanged(tenantId, table.getId(), "FREE");
             }
         }
+
 
         Order saved = orderRepository.save(order);
         if (order.getTable() != null) {
@@ -754,8 +862,15 @@ public class OrderService {
     @Transactional
     public CancellationReceiptDto.CancellationResult cancelOrder(
             UUID orderId, UUID userId, UUID tenantId, CancellationReceiptDto.CancelOrderRequest request) {
+        return cancelOrder(orderId, userId, tenantId, null, request);
+    }
+
+    @Transactional
+    public CancellationReceiptDto.CancellationResult cancelOrder(
+            UUID orderId, UUID userId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal userPrincipal, CancellationReceiptDto.CancelOrderRequest request) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
+        validateOrderOwnership(order, userPrincipal);
 
         if (order.getStatus() == Order.OrderStatus.PAID) {
             throw PosException.badRequest("To'langan buyurtmani bekor qilib bo'lmaydi!");
@@ -791,11 +906,12 @@ public class OrderService {
         order.setClosedAt(Instant.now());
         order.recalculateTotals();
 
-        // Release table if linked
+        // Release table if linked and clear waiter
         if (order.getTable() != null) {
             RestaurantTable table = order.getTable();
             table.setStatus(RestaurantTable.TableStatus.FREE);
             table.setCurrentOrderId(null);
+            table.setWaiter(null);
             tableRepository.save(table);
             wsNotification.notifyTableStatusChanged(tenantId, table.getId(), "FREE");
         }
@@ -854,10 +970,19 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public List<CancellationReceiptDto.Response> getCancellationReceipts(UUID orderId, UUID tenantId) {
+        return getCancellationReceipts(orderId, tenantId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CancellationReceiptDto.Response> getCancellationReceipts(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user) {
+        Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
+        validateOrderOwnership(order, user);
         return cancellationReceiptRepository.findByTenantIdAndOrderIdOrderByCreatedAtDesc(tenantId, orderId).stream()
                 .map(this::toReceiptResponse)
                 .collect(Collectors.toList());
     }
+
 
     public CancellationReceiptDto.Response toReceiptResponse(CancellationReceipt r) {
         return CancellationReceiptDto.Response.builder()

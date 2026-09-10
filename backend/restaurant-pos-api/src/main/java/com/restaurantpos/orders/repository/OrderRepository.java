@@ -40,4 +40,14 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     default List<Order> findHistoryOrders(UUID tenantId) {
         return findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES);
     }
+
+    List<Order> findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(UUID tenantId, List<Order.OrderStatus> statuses, UUID waiterId);
+
+    default List<Order> findActiveOrdersByWaiter(UUID tenantId, UUID waiterId) {
+        return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, ACTIVE_STATUSES, waiterId);
+    }
+
+    default List<Order> findHistoryOrdersByWaiter(UUID tenantId, UUID waiterId) {
+        return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES, waiterId);
+    }
 }

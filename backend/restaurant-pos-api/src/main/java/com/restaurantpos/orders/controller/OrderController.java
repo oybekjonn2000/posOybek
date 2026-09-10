@@ -20,15 +20,16 @@ import java.util.UUID;
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
 @Tag(name = "Orders", description = "POS Orders Lifecycle API")
+@PreAuthorize("!hasRole('KITCHEN')")
 public class OrderController {
 
     private final OrderService orderService;
 
-    @GetMapping
+    @GetMapping({"", "/active"})
     @Operation(summary = "Get active orders")
     public ResponseEntity<ApiResponse<List<OrderDto.Response>>> getActiveOrders(
             @AuthenticationPrincipal UserPrincipal user) {
-        List<OrderDto.Response> orders = orderService.getActiveOrders(user.getTenantId());
+        List<OrderDto.Response> orders = orderService.getActiveOrders(user.getTenantId(), user);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
 
@@ -39,7 +40,7 @@ public class OrderController {
             @RequestParam(required = false) String paymentMethod,
             @RequestParam(required = false) String search,
             @AuthenticationPrincipal UserPrincipal user) {
-        List<OrderDto.Response> orders = orderService.getOrderHistory(user.getTenantId(), tableId, paymentMethod, search);
+        List<OrderDto.Response> orders = orderService.getOrderHistory(user.getTenantId(), tableId, paymentMethod, search, user);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
 
@@ -48,7 +49,7 @@ public class OrderController {
     public ResponseEntity<ApiResponse<OrderDto.Response>> getOrder(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.getOrderById(id, user.getTenantId());
+        OrderDto.Response order = orderService.getOrderById(id, user.getTenantId(), user);
         return ResponseEntity.ok(ApiResponse.success(order));
     }
 
@@ -69,7 +70,7 @@ public class OrderController {
             @PathVariable UUID id,
             @Valid @RequestBody OrderDto.AddItemsRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.addItemsToOrder(id, user.getTenantId(), request);
+        OrderDto.Response order = orderService.addItemsToOrder(id, user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Items added to order"));
     }
 
@@ -80,7 +81,7 @@ public class OrderController {
             @PathVariable UUID id,
             @RequestBody(required = false) OrderDto.SendToKitchenRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.sendNewItemsToKitchen(id, user.getTenantId(), request);
+        OrderDto.Response order = orderService.sendNewItemsToKitchen(id, user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Yangi mahsulotlar oshxonaga muvaffaqiyatli yuborildi"));
     }
 
@@ -92,7 +93,7 @@ public class OrderController {
             @PathVariable UUID itemId,
             @Valid @RequestBody OrderDto.VoidItemRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.voidOrderItem(id, itemId, user.getUserId(), user.getTenantId(), request);
+        OrderDto.Response order = orderService.voidOrderItem(id, itemId, user.getUserId(), user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Item voided"));
     }
 
@@ -103,7 +104,7 @@ public class OrderController {
             @PathVariable UUID id,
             @RequestBody OrderDto.ApplyDiscountRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.applyDiscount(id, user.getTenantId(), request);
+        OrderDto.Response order = orderService.applyDiscount(id, user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Discount applied"));
     }
 
@@ -113,7 +114,7 @@ public class OrderController {
             @PathVariable UUID id,
             @Valid @RequestBody OrderDto.UpdateStatusRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.updateOrderStatus(id, user.getTenantId(), request);
+        OrderDto.Response order = orderService.updateOrderStatus(id, user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Order status updated"));
     }
 
@@ -126,7 +127,7 @@ public class OrderController {
             @Valid @RequestBody com.restaurantpos.orders.dto.CancellationReceiptDto.CancelItemRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
         com.restaurantpos.orders.dto.CancellationReceiptDto.CancellationResult result =
-                orderService.cancelOrderItem(id, itemId, user.getUserId(), user.getTenantId(), request);
+                orderService.cancelOrderItem(id, itemId, user.getUserId(), user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(result, "Mahsulot bekor qilindi"));
     }
 
@@ -138,7 +139,7 @@ public class OrderController {
             @Valid @RequestBody com.restaurantpos.orders.dto.CancellationReceiptDto.CancelOrderRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
         com.restaurantpos.orders.dto.CancellationReceiptDto.CancellationResult result =
-                orderService.cancelOrder(id, user.getUserId(), user.getTenantId(), request);
+                orderService.cancelOrder(id, user.getUserId(), user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(result, "Buyurtma to'liq bekor qilindi"));
     }
 
@@ -148,7 +149,7 @@ public class OrderController {
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal user) {
         List<com.restaurantpos.orders.dto.CancellationReceiptDto.Response> receipts =
-                orderService.getCancellationReceipts(id, user.getTenantId());
+                orderService.getCancellationReceipts(id, user.getTenantId(), user);
         return ResponseEntity.ok(ApiResponse.success(receipts));
     }
 }

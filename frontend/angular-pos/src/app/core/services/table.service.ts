@@ -21,6 +21,9 @@ export interface RestaurantTable {
   activeOrderNumber?: string;
   itemCount?: number;
   totalAmount?: number;
+  waiterId?: string;
+  waiterName?: string;
+  myTable?: boolean;
   active: boolean;
 }
 
@@ -67,6 +70,10 @@ export class TableService {
 
   getTableById(id: string): Observable<ApiResponse<RestaurantTable>> {
     return this.http.get<ApiResponse<RestaurantTable>>(`${this.API}/${id}`);
+  }
+
+  occupyTable(id: string): Observable<ApiResponse<RestaurantTable>> {
+    return this.http.post<ApiResponse<RestaurantTable>>(`${this.API}/${id}/occupy`, {});
   }
 
   updateTableStatus(id: string, status: string, currentOrderId?: string): Observable<ApiResponse<RestaurantTable>> {

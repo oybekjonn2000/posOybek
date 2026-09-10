@@ -26,6 +26,10 @@ export class NotificationService {
     this.add({ type: 'warning', message, duration });
   }
 
+  warning(message: string, duration = 5000): void {
+    this.warn(message, duration);
+  }
+
   info(message: string, duration = 4000): void {
     this.add({ type: 'info', message, duration });
   }

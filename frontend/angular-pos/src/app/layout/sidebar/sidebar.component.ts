@@ -7,6 +7,8 @@ interface NavItem {
   label: string;
   route: string;
   permission?: string;
+  adminOnly?: boolean;
+  disallowRoles?: string[];
   badge?: number;
 }
 
@@ -221,10 +223,10 @@ export class SidebarComponent {
     { icon: '🍔', label: 'Products', route: '/products', permission: 'MANAGE_PRODUCTS' },
     { icon: '📁', label: 'Categories', route: '/categories', permission: 'MANAGE_CATEGORIES' },
     { icon: '📦', label: 'Inventory', route: '/inventory', permission: 'VIEW_STOCK' },
-    { icon: '👥', label: 'Customers', route: '/customers' },
+    { icon: '👥', label: 'Customers', route: '/customers', adminOnly: true },
     { icon: '👤', label: 'Employees', route: '/employees', permission: 'MANAGE_USERS' },
     { icon: '📈', label: 'Reports', route: '/reports', permission: 'VIEW_REPORTS' },
-    { icon: '💰', label: 'Shifts', route: '/shifts' },
+    { icon: '💰', label: 'Shifts', route: '/shifts', adminOnly: true },
     { icon: '📱', label: 'Devices', route: '/devices', permission: 'MANAGE_DEVICES' },
     { icon: '⚙️', label: 'Settings', route: '/settings', permission: 'MANAGE_SETTINGS' },
   ];
@@ -232,9 +234,24 @@ export class SidebarComponent {
   constructor(public auth: AuthService) {}
 
   visibleNavItems() {
-    return this.navItems.filter(item =>
-      !item.permission || this.auth.hasPermission(item.permission)
-    );
+    const role = (this.auth.user()?.role || '').toUpperCase();
+    return this.navItems.filter(item => {
+      if (item.adminOnly && !this.auth.isAdmin()) {
+        return false;
+      }
+      if (item.disallowRoles && item.disallowRoles.includes(role)) {
+        return false;
+      }
+      // Kitchen user must NOT see Orders, POS, Tables, Dashboard, etc.
+      if (role === 'KITCHEN' && item.route !== '/kitchen') {
+        return false;
+      }
+      // Waiter user must NOT see Kitchen
+      if (role === 'WAITER' && item.route === '/kitchen') {
+        return false;
+      }
+      return !item.permission || this.auth.hasPermission(item.permission);
+    });
   }
 
   toggleCollapse(): void {

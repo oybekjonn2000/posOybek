@@ -47,4 +47,8 @@ export class KitchenService {
     const params = new HttpParams().set('status', status);
     return this.http.put<ApiResponse<void>>(`${this.API}/items/${itemId}/status`, null, { params });
   }
+
+  deleteKitchen(id: string): Observable<ApiResponse<void>> {
+    return this.http.delete<ApiResponse<void>>(`${environment.apiUrl}/kitchens/${id}`);
+  }
 }

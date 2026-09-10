@@ -24,6 +24,13 @@ public class KitchenDto {
         private String description;
         private int sortOrder;
         private boolean active;
+        private String color;
+        private boolean autoPrint;
+        private boolean soundNotification;
+        private Integer preparationTimeMinutes;
+        private UUID printerId;
+        private String printerName;
+        private String printerStatus;
     }
 
     @Data
@@ -38,6 +45,27 @@ public class KitchenDto {
 
         private String description;
         private int sortOrder = 0;
+        private String color;
+        private Boolean autoPrint;
+        private Boolean soundNotification;
+        private Integer preparationTimeMinutes;
+        private UUID printerId;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class UpdateRequest {
+        private String name;
+        private String code;
+        private String description;
+        private Integer sortOrder;
+        private Boolean active;
+        private String color;
+        private Boolean autoPrint;
+        private Boolean soundNotification;
+        private Integer preparationTimeMinutes;
+        private UUID printerId;
     }
 
     @Data

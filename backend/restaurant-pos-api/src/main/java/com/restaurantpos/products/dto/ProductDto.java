@@ -77,6 +77,7 @@ public class ProductDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CreateRequest {
+        @NotNull(message = "Kategoriya tanlanishi shart")
         private UUID categoryId;
         private UUID kitchenId;
         private String sku;

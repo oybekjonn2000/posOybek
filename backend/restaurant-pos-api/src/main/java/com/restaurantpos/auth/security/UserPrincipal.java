@@ -21,6 +21,7 @@ public class UserPrincipal implements UserDetails {
 
     private final UUID userId;
     private final UUID tenantId;
+    private final UUID kitchenId;
     private final UUID deviceId;
     private final String username;
     private final String password;
@@ -74,4 +75,17 @@ public class UserPrincipal implements UserDetails {
     public String getFullName() {
         return firstName + (lastName != null ? " " + lastName : "");
     }
+
+    public boolean isWaiter() {
+        return "WAITER".equalsIgnoreCase(role);
+    }
+
+    public boolean isKitchen() {
+        return "KITCHEN".equalsIgnoreCase(role);
+    }
+
+    public boolean isAdminOrManager() {
+        return "ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role);
+    }
 }
+

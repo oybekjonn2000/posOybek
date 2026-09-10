@@ -19,6 +19,10 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     List<Product> findByTenantIdAndCategoryIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(UUID tenantId, UUID categoryId);
 
+    long countByTenantIdAndCategoryIdAndDeletedAtIsNull(UUID tenantId, UUID categoryId);
+
+    long countByTenantIdAndKitchenIdAndDeletedAtIsNull(UUID tenantId, UUID kitchenId);
+
     Optional<Product> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
 
     Optional<Product> findByTenantIdAndBarcodeAndDeletedAtIsNull(UUID tenantId, String barcode);

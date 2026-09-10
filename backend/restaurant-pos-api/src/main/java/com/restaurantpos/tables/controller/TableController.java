@@ -47,7 +47,7 @@ public class TableController {
     public ResponseEntity<ApiResponse<List<TableDto.Response>>> getTables(
             @AuthenticationPrincipal UserPrincipal user,
             @RequestParam(required = false) UUID zoneId) {
-        List<TableDto.Response> tables = tableService.getTables(user.getTenantId(), zoneId);
+        List<TableDto.Response> tables = tableService.getTables(user.getTenantId(), zoneId, user);
         return ResponseEntity.ok(ApiResponse.success(tables));
     }
 
@@ -56,9 +56,20 @@ public class TableController {
     public ResponseEntity<ApiResponse<TableDto.Response>> getTable(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal user) {
-        TableDto.Response table = tableService.getTableById(id, user.getTenantId());
+        TableDto.Response table = tableService.getTableById(id, user.getTenantId(), user);
         return ResponseEntity.ok(ApiResponse.success(table));
     }
+
+    @PostMapping("/{id}/occupy")
+    @PreAuthorize("hasAnyAuthority('CREATE_ORDER', 'ROLE_ADMIN', 'ROLE_MANAGER', 'ROLE_WAITER')")
+    @Operation(summary = "Occupy table and bind to current waiter")
+    public ResponseEntity<ApiResponse<TableDto.Response>> occupyTable(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserPrincipal user) {
+        TableDto.Response table = tableService.occupyTable(id, user.getTenantId(), user);
+        return ResponseEntity.ok(ApiResponse.success(table, "Stol muvaffaqiyatli egallandi"));
+    }
+
 
     @PutMapping("/{id}/status")
     @Operation(summary = "Update table status (FREE, OCCUPIED, RESERVED, BILL_REQUESTED, CLEANING)")

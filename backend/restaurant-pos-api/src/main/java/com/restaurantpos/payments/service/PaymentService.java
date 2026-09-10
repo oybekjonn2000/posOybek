@@ -38,6 +38,7 @@ public class PaymentService {
     private final EntityManager entityManager;
     private final com.restaurantpos.common.websocket.WebSocketNotificationService wsNotification;
     private final com.restaurantpos.orders.service.OrderService orderService;
+    private final com.restaurantpos.printers.service.PrintRoutingService printRoutingService;
 
     private long nextPaymentSequence() {
         return ((Number) entityManager
@@ -87,11 +88,19 @@ public class PaymentService {
         order.setClosedAt(now);
         Order savedOrder = orderRepository.save(order);
 
+        // Hardware Print Routing: dispatch receipt to Cashier printer
+        try {
+            printRoutingService.routeAndPrintReceipt(savedOrder, saved);
+        } catch (Exception pex) {
+            // Receipt print error never aborts completed payment
+        }
+
         // Free the table
         if (order.getTable() != null) {
             RestaurantTable table = order.getTable();
             table.setStatus(com.restaurantpos.tables.entity.RestaurantTable.TableStatus.FREE);
             table.setCurrentOrderId(null);
+            table.setWaiter(null);
             RestaurantTable savedTable = tableRepository.save(table);
             wsNotification.notifyTableUpdated(tenantId, orderService.toTableResponse(savedTable, null));
         }

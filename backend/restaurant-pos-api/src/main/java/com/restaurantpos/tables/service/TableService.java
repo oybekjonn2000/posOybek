@@ -30,7 +30,12 @@ public class TableService {
     private final TableZoneRepository zoneRepository;
     private final TenantRepository tenantRepository;
     private final OrderRepository orderRepository;
+    private final com.restaurantpos.users.repository.UserRepository userRepository;
+    private final com.restaurantpos.shifts.repository.ShiftRepository shiftRepository;
     private final WebSocketNotificationService wsNotification;
+
+    private static final java.util.concurrent.atomic.AtomicInteger ORDER_COUNTER = new java.util.concurrent.atomic.AtomicInteger(500);
+
 
     @Transactional(readOnly = true)
     public List<TableDto.ZoneResponse> getZones(UUID tenantId) {
@@ -74,7 +79,7 @@ public class TableService {
     }
 
     @Transactional(readOnly = true)
-    public List<TableDto.Response> getTables(UUID tenantId, UUID zoneId) {
+    public List<TableDto.Response> getTables(UUID tenantId, UUID zoneId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
         List<RestaurantTable> tables = zoneId != null
                 ? tableRepository.findByTenantIdAndZoneIdAndDeletedAtIsNullOrderByTableNumberAsc(tenantId, zoneId)
                 : tableRepository.findByTenantIdAndDeletedAtIsNullOrderByTableNumberAsc(tenantId);
@@ -95,18 +100,81 @@ public class TableService {
         return tables.stream()
                 .map(t -> {
                     Order order = t.getCurrentOrderId() != null ? finalOrdersMap.get(t.getCurrentOrderId()) : null;
-                    return toResponse(t, order);
+                    return toResponse(t, order, currentUser);
                 })
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public TableDto.Response getTableById(UUID id, UUID tenantId) {
+    public TableDto.Response getTableById(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
         RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Table not found: " + id));
+
+        // Data Isolation: If table is occupied by another waiter, throw 403 Forbidden!
+        if (currentUser != null && currentUser.isWaiter()) {
+            if (table.getWaiter() != null && !table.getWaiter().getId().equals(currentUser.getUserId())) {
+                throw PosException.forbidden("Bu stol boshqa ofitsantga biriktirilgan.");
+            }
+        }
+
         Order order = table.getCurrentOrderId() != null ? orderRepository.findById(table.getCurrentOrderId()).orElse(null) : null;
-        return toResponse(table, order);
+        return toResponse(table, order, currentUser);
     }
+
+    @Transactional
+    public TableDto.Response occupyTable(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
+        // Pessimistic lock to prevent race conditions when two waiters attempt to open the same table concurrently
+        RestaurantTable table = tableRepository.findByIdWithLock(id, tenantId)
+                .orElseThrow(() -> PosException.notFound("Table not found: " + id));
+
+        if (currentUser != null && currentUser.isWaiter()) {
+            if (table.getWaiter() != null && !table.getWaiter().getId().equals(currentUser.getUserId())) {
+                throw PosException.forbidden("Bu stol boshqa ofitsantga biriktirilgan.");
+            }
+        }
+
+        // If table already has an active order owned by this waiter, return it
+        if (table.getStatus() == RestaurantTable.TableStatus.OCCUPIED && table.getCurrentOrderId() != null) {
+            Order existingOrder = orderRepository.findById(table.getCurrentOrderId()).orElse(null);
+            return toResponse(table, existingOrder, currentUser);
+        }
+
+        com.restaurantpos.users.entity.User waiter = userRepository.findById(currentUser.getUserId())
+                .orElseThrow(() -> PosException.notFound("Ofitsiant topilmadi"));
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> PosException.notFound("Tenant topilmadi"));
+
+        com.restaurantpos.shifts.entity.Shift currentShift = shiftRepository
+                .findByTenantIdAndStatus(tenantId, com.restaurantpos.shifts.entity.Shift.ShiftStatus.OPEN)
+                .orElse(null);
+
+        // 1. Create active order for table
+        Order order = new Order();
+        order.setTenant(tenant);
+        order.setTable(table);
+        order.setWaiter(waiter);
+        order.setShift(currentShift);
+        order.setOrderType(Order.OrderType.DINE_IN);
+        order.setStatus(Order.OrderStatus.OPEN);
+
+        String dateStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        order.setOrderNumber("ORD-" + dateStr + "-" + String.format("%04d", ORDER_COUNTER.incrementAndGet() % 10000));
+        order.recalculateTotals();
+
+        Order savedOrder = orderRepository.save(order);
+
+        // 2. Bind table to current waiter and set to OCCUPIED
+        table.setStatus(RestaurantTable.TableStatus.OCCUPIED);
+        table.setWaiter(waiter);
+        table.setCurrentOrderId(savedOrder.getId());
+        RestaurantTable savedTable = tableRepository.save(table);
+
+        TableDto.Response res = toResponse(savedTable, savedOrder, currentUser);
+        wsNotification.notifyTableUpdated(tenantId, res);
+        return res;
+    }
+
 
     @Transactional
     public TableDto.Response updateTableStatus(UUID id, UUID tenantId, TableDto.UpdateStatusRequest request) {
@@ -219,12 +287,43 @@ public class TableService {
         tableRepository.save(table);
     }
 
-    public TableDto.Response toResponse(RestaurantTable table, Order activeOrder) {
+    public TableDto.Response toResponse(RestaurantTable table, Order activeOrder, com.restaurantpos.auth.security.UserPrincipal currentUser) {
         String activeOrderNumber = null;
         Integer itemCount = 0;
         BigDecimal totalAmount = BigDecimal.ZERO;
 
-        if (activeOrder != null && activeOrder.getStatus() != Order.OrderStatus.PAID && activeOrder.getStatus() != Order.OrderStatus.CANCELLED) {
+        boolean isOtherWaiter = false;
+        if (currentUser != null && currentUser.isWaiter()) {
+            if (table.getWaiter() != null && !table.getWaiter().getId().equals(currentUser.getUserId())) {
+                isOtherWaiter = true;
+            }
+        }
+
+        UUID waiterId = table.getWaiter() != null ? table.getWaiter().getId() : null;
+        String waiterName = null;
+        Boolean myTable = null;
+
+        if (table.getWaiter() != null) {
+            if (isOtherWaiter) {
+                waiterName = "Boshqa ofitsiant";
+                myTable = false;
+            } else {
+                waiterName = (table.getWaiter().getFirstName() + " " + (table.getWaiter().getLastName() != null ? table.getWaiter().getLastName() : "")).trim();
+                myTable = true;
+            }
+        } else {
+            myTable = true; // Free table
+        }
+
+        UUID currentOrderId = table.getCurrentOrderId();
+
+        if (isOtherWaiter) {
+            // Data Isolation: Sanitize sensitive order info for other waiters!
+            activeOrderNumber = null;
+            itemCount = 0;
+            totalAmount = BigDecimal.ZERO;
+            currentOrderId = null;
+        } else if (activeOrder != null && activeOrder.getStatus() != Order.OrderStatus.PAID && activeOrder.getStatus() != Order.OrderStatus.CANCELLED) {
             activeOrderNumber = activeOrder.getOrderNumber();
             itemCount = activeOrder.getItems() != null
                     ? activeOrder.getItems().stream()
@@ -248,16 +347,23 @@ public class TableService {
                 .width(table.getWidth())
                 .height(table.getHeight())
                 .status(table.getStatus() != null ? table.getStatus().name() : "FREE")
-                .currentOrderId(table.getCurrentOrderId())
+                .currentOrderId(currentOrderId)
                 .activeOrderNumber(activeOrderNumber)
                 .itemCount(itemCount)
                 .totalAmount(totalAmount)
+                .waiterId(waiterId)
+                .waiterName(waiterName)
+                .myTable(myTable)
                 .active(table.isActive())
                 .build();
     }
 
+    public TableDto.Response toResponse(RestaurantTable table, Order activeOrder) {
+        return toResponse(table, activeOrder, null);
+    }
+
     public TableDto.Response toResponse(RestaurantTable table) {
         Order order = table.getCurrentOrderId() != null ? orderRepository.findById(table.getCurrentOrderId()).orElse(null) : null;
-        return toResponse(table, order);
+        return toResponse(table, order, null);
     }
 }

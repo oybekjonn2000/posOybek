@@ -19,6 +19,10 @@ public class Category extends BaseEntity {
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "kitchen_id", nullable = false)
+    private com.restaurantpos.kitchen.entity.Kitchen kitchen;
+
     @Column(name = "name", nullable = false, length = 255)
     private String name;
 

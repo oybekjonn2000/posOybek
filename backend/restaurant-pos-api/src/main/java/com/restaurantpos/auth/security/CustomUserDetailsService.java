@@ -48,6 +48,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         return UserPrincipal.builder()
                 .userId(user.getId())
                 .tenantId(user.getTenant().getId())
+                .kitchenId(user.getKitchen() != null ? user.getKitchen().getId() : null)
                 .username(user.getUsername())
                 .password(user.getPasswordHash())
                 .firstName(user.getFirstName())

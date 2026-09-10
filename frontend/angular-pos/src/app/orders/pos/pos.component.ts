@@ -4,10 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ProductService, Product } from '../../core/services/product.service';
 import { CategoryService, Category } from '../../core/services/category.service';
+import { KitchenService, KitchenStation } from '../../core/services/kitchen.service';
 import { TableService, RestaurantTable } from '../../core/services/table.service';
 import { OrderService, CreateOrderRequest, CreateOrderItemRequest, Order } from '../../core/services/order.service';
 import { PaymentService } from '../../core/services/payment.service';
 import { NotificationService } from '../../core/services/notification.service';
+import { AuthService } from '../../core/services/auth.service';
 
 export interface PosCartItem {
   id?: string;
@@ -56,12 +58,24 @@ export interface PosCartItem {
           </div>
         </div>
 
-        <!-- Category Tabs -->
+        <!-- Kitchen Station Filter Strip -->
+        <div class="kitchen-stations-strip">
+          <button class="station-chip" [class.station-chip--active]="!selectedKitchenId()" (click)="selectKitchen(undefined)">
+            🍽️ Barcha Oshxonalar
+          </button>
+          @for (k of kitchens(); track k.id) {
+            <button class="station-chip" [class.station-chip--active]="selectedKitchenId() === k.id" (click)="selectKitchen(k.id)">
+              {{ getStationEmoji(k.code) }} {{ k.name }}
+            </button>
+          }
+        </div>
+
+        <!-- Category Tabs (Dynamically filtered by selected Kitchen) -->
         <div class="categories-tabs">
           <button class="cat-tab" [class.cat-tab--active]="!selectedCategoryId()" (click)="selectCategory(undefined)">
-            Barchasi
+            Barcha bo'limlar
           </button>
-          @for (cat of categories(); track cat.id) {
+          @for (cat of visibleCategories(); track cat.id) {
             <button class="cat-tab" [class.cat-tab--active]="selectedCategoryId() === cat.id" (click)="selectCategory(cat.id)">
               {{ cat.name }}
             </button>
@@ -77,13 +91,16 @@ export interface PosCartItem {
             </div>
           } @else if (filteredProducts().length === 0) {
             <div class="empty-products">
-              <p>Bu bo'limda mahsulotlar topilmadi.</p>
+              <p>Ushbu oshxona yoki bo'limda mahsulotlar topilmadi.</p>
             </div>
           } @else {
             <div class="products-grid">
               @for (prod of filteredProducts(); track prod.id) {
                 <div class="product-card" (click)="addToCart(prod)">
                   <div class="product-card__content">
+                    <div class="product-card__station-badge">
+                      {{ getProductStationBadge(prod) }}
+                    </div>
                     <div class="product-card__name">{{ prod.name }}</div>
                     <div class="product-card__sku">{{ prod.unit }}</div>
                     <div class="product-card__price">{{ formatPrice(prod.salePrice || prod.price || 0) }}</div>
@@ -203,11 +220,13 @@ export interface PosCartItem {
                 <span class="new-count-badge">{{ newItemsCount() }} ta yangi</span>
               }
             </button>
-            <button class="btn-pay" 
-                    [disabled]="subtotal() === 0 || isSubmitting()"
-                    (click)="openPaymentModal()">
-              💳 To'lov Qilish
-            </button>
+            @if (canProcessPayment()) {
+              <button class="btn-pay" 
+                      [disabled]="subtotal() === 0 || isSubmitting()"
+                      (click)="openPaymentModal()">
+                💳 To'lov Qilish
+              </button>
+            }
           </div>
         </div>
       </div>
@@ -365,6 +384,40 @@ export interface PosCartItem {
       color: var(--text-primary);
       width: 100%;
     }
+    .kitchen-stations-strip {
+      display: flex;
+      gap: 8px;
+      padding: 10px 20px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+    .station-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all var(--transition);
+
+      &:hover {
+        border-color: var(--primary);
+        color: var(--text-primary);
+      }
+      &--active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+      }
+    }
     .categories-tabs {
       display: flex;
       gap: 10px;
@@ -419,6 +472,20 @@ export interface PosCartItem {
         transform: translateY(-2px);
         border-color: var(--primary);
         box-shadow: var(--shadow-md);
+      }
+
+      &__station-badge {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--primary-light);
+        background: rgba(var(--primary-rgb), 0.08);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        width: fit-content;
       }
 
       &__name {
@@ -756,12 +823,12 @@ export interface PosCartItem {
       }
     }
     .cart-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      display: flex;
       gap: 10px;
       margin-top: 12px;
     }
     .btn-kitchen, .btn-pay {
+      flex: 1;
       padding: 11px 8px;
       border: none;
       border-radius: var(--radius-md);
@@ -887,12 +954,21 @@ export interface PosCartItem {
 })
 export class PosComponent implements OnInit {
   categories = signal<Category[]>([]);
+  kitchens = signal<KitchenStation[]>([]);
   products = signal<Product[]>([]);
   filteredProducts = signal<Product[]>([]);
   loadingProducts = signal(true);
 
+  selectedKitchenId = signal<string | undefined>(undefined);
   selectedCategoryId = signal<string | undefined>(undefined);
   searchQuery = '';
+
+  // Categories dynamically filtered by selected Kitchen
+  visibleCategories = computed(() => {
+    const kId = this.selectedKitchenId();
+    if (!kId) return this.categories();
+    return this.categories().filter(c => c.kitchenId === kId);
+  });
 
   selectedTable = signal<RestaurantTable | null>(null);
   currentOrderId = signal<string | null>(null);
@@ -928,18 +1004,31 @@ export class PosComponent implements OnInit {
   serviceCharge = computed(() => Math.round(this.subtotal() * 0.10));
   total = computed(() => this.subtotal() + this.serviceCharge());
 
+  canProcessPayment = computed(() => {
+    const user = this.auth.user();
+    const role = (user?.role || '').toUpperCase();
+    const username = (user?.username || '').toLowerCase();
+    if (role === 'WAITER' || username === 'waiter') {
+      return false;
+    }
+    return this.auth.hasPermission('PROCESS_PAYMENT') || role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER';
+  });
+
   constructor(
     private productService: ProductService,
     private categoryService: CategoryService,
+    private kitchenService: KitchenService,
     private tableService: TableService,
     private orderService: OrderService,
     private paymentService: PaymentService,
     private notify: NotificationService,
     private route: ActivatedRoute,
-    public router: Router
+    public router: Router,
+    public auth: AuthService
   ) {}
 
   ngOnInit(): void {
+    this.loadKitchens();
     this.loadCategories();
     this.loadProducts();
 
@@ -968,6 +1057,16 @@ export class PosComponent implements OnInit {
     });
   }
 
+  loadKitchens(): void {
+    this.kitchenService.getKitchens().subscribe({
+      next: (res) => {
+        if (res.success && res.data) {
+          this.kitchens.set(res.data);
+        }
+      }
+    });
+  }
+
   loadCategories(): void {
     this.categoryService.getCategories(true).subscribe({
       next: (res) => {
@@ -980,7 +1079,7 @@ export class PosComponent implements OnInit {
 
   loadProducts(): void {
     this.loadingProducts.set(true);
-    this.productService.getProducts(this.selectedCategoryId(), undefined, true).subscribe({
+    this.productService.getProducts(undefined, undefined, true).subscribe({
       next: (res) => {
         this.loadingProducts.set(false);
         if (res.success && res.data) {
@@ -994,8 +1093,31 @@ export class PosComponent implements OnInit {
     });
   }
 
+  selectKitchen(kitchenId?: string): void {
+    this.selectedKitchenId.set(kitchenId);
+    // If selected category does not belong to selected kitchen, reset it
+    if (kitchenId && this.selectedCategoryId()) {
+      const cat = this.categories().find(c => c.id === this.selectedCategoryId());
+      if (!cat || cat.kitchenId !== kitchenId) {
+        this.selectedCategoryId.set(undefined);
+      }
+    }
+    this.filterProducts();
+  }
+
+  selectCategory(catId?: string): void {
+    this.selectedCategoryId.set(catId);
+    this.filterProducts();
+  }
+
   filterProducts(): void {
     let prods = this.products();
+    if (this.selectedKitchenId()) {
+      prods = prods.filter(p => {
+        const cat = this.categories().find(c => c.id === p.categoryId);
+        return (cat?.kitchenId || p.kitchenId) === this.selectedKitchenId();
+      });
+    }
     if (this.selectedCategoryId()) {
       prods = prods.filter(p => p.categoryId === this.selectedCategoryId());
     }
@@ -1006,9 +1128,23 @@ export class PosComponent implements OnInit {
     this.filteredProducts.set(prods);
   }
 
-  selectCategory(catId?: string): void {
-    this.selectedCategoryId.set(catId);
-    this.filterProducts();
+  getStationEmoji(code?: string): string {
+    if (!code) return '👨‍🍳';
+    switch (code.toUpperCase()) {
+      case 'PALOV': case 'PALOVCHI': return '🥘';
+      case 'SOMSA': case 'SOMSAPAZ': return '🥟';
+      case 'BAR': return '🍹';
+      case 'PIZZA': case 'PITSA': return '🍕';
+      case 'MAIN': case 'MAIN_KITCHEN': return '👨‍🍳';
+      default: return '🍳';
+    }
+  }
+
+  getProductStationBadge(prod: Product): string {
+    const cat = this.categories().find(c => c.id === prod.categoryId);
+    const kId = cat?.kitchenId || prod.kitchenId;
+    const k = this.kitchens().find(item => item.id === kId);
+    return `${this.getStationEmoji(k?.code)} ${k?.name || 'Oshxona'}`;
   }
 
   loadExistingOrder(orderId: string): void {
@@ -1017,6 +1153,11 @@ export class PosComponent implements OnInit {
         if (res.success && res.data) {
           this.updateCartFromOrder(res.data);
         }
+      },
+      error: (err) => {
+        const msg = err.error?.message || "Bu buyurtma boshqa ofitsantga tegishli!";
+        this.notify.error(msg);
+        this.router.navigate(['/tables']);
       }
     });
   }
@@ -1256,6 +1397,10 @@ export class PosComponent implements OnInit {
   }
 
   openPaymentModal(): void {
+    if (!this.canProcessPayment()) {
+      this.notify.error("Ofitsiant to'lov qabul qila olmaydi. To'lov faqat Kassa orqali amalga oshiriladi!");
+      return;
+    }
     this.cashReceived = this.total();
     this.showPaymentModal.set(true);
   }
@@ -1265,6 +1410,10 @@ export class PosComponent implements OnInit {
   }
 
   submitPayment(): void {
+    if (!this.canProcessPayment()) {
+      this.notify.error("Ofitsiant to'lov qabul qila olmaydi. To'lov faqat Kassa orqali amalga oshiriladi!");
+      return;
+    }
     if (this.subtotal() === 0) return;
     this.isSubmitting.set(true);
 

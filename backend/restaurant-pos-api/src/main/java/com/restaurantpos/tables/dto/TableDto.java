@@ -45,6 +45,9 @@ public class TableDto {
         private String activeOrderNumber;
         private Integer itemCount;
         private BigDecimal totalAmount;
+        private UUID waiterId;
+        private String waiterName;
+        private Boolean myTable;
         private boolean active;
     }
 
