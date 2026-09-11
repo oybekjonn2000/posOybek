@@ -4,6 +4,12 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ApiResponse } from './auth.service';
 
+export interface KitchenSummary {
+  id: string;
+  name: string;
+  code: string;
+}
+
 export interface Employee {
   id: string;
   username: string;
@@ -16,6 +22,8 @@ export interface Employee {
   role: string;
   roleId?: string;
   permissions: string[];
+  kitchenIds?: string[];
+  kitchens?: KitchenSummary[];
   createdAt: string;
 }
 
@@ -34,6 +42,7 @@ export interface CreateEmployeeRequest {
   phone?: string;
   pin?: string;
   role: string;
+  kitchenIds?: string[];
 }
 
 export interface UpdateEmployeeRequest {
@@ -44,6 +53,7 @@ export interface UpdateEmployeeRequest {
   pin?: string;
   role: string;
   active?: boolean;
+  kitchenIds?: string[];
 }
 
 @Injectable({ providedIn: 'root' })

@@ -49,4 +49,8 @@ public class PosException extends RuntimeException {
     public static PosException unauthorized(String message) {
         return new PosException(message, "UNAUTHORIZED", HttpStatus.UNAUTHORIZED);
     }
+
+    public static PosException internalError(String message) {
+        return new PosException(message, "INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
 }

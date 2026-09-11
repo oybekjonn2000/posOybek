@@ -39,6 +39,19 @@ public class InventoryTransaction {
     @Column(name = "quantity_after", nullable = false, precision = 15, scale = 3)
     private BigDecimal quantityAfter;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "warehouse_id")
+    private Warehouse warehouse;
+
+    @Column(name = "unit_cost", precision = 15, scale = 2)
+    private BigDecimal unitCost;
+
+    @Column(name = "total_cost", precision = 15, scale = 2)
+    private BigDecimal totalCost;
+
+    @Column(name = "reference_number", length = 100)
+    private String referenceNumber;
+
     @Column(name = "reference_type", length = 50)
     private String referenceType;
 
@@ -55,10 +68,13 @@ public class InventoryTransaction {
     private Instant createdAt = Instant.now();
 
     public enum TransactionType {
-        PURCHASE,    // Ombor to'ldirish
+        PURCHASE,    // Ombor to'ldirish (Kirim)
+        IN,          // Kirim
+        OUT,         // Chiqim (Oshxona, yaroqlilik, etc.)
         SALE,        // Savdo (buyurtmadan avtomatik)
-        ADJUSTMENT,  // Qo'lda tuzatish
+        ADJUSTMENT,  // Inventarizatsiya / tuzatish
         WASTE,       // Isrof / chiqindi
+        TRANSFER,    // Ko'chirish
         RETURN       // Qaytarish
     }
 }

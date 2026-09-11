@@ -33,11 +33,21 @@ public class InventoryItem {
     @Column(nullable = false, precision = 15, scale = 3)
     private BigDecimal quantity = BigDecimal.ZERO;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "warehouse_id")
+    private Warehouse warehouse;
+
     @Column(name = "min_quantity", nullable = false, precision = 15, scale = 3)
     private BigDecimal minQuantity = BigDecimal.ZERO;
 
+    @Column(name = "max_quantity", precision = 15, scale = 3)
+    private BigDecimal maxQuantity = BigDecimal.ZERO;
+
     @Column(name = "cost_price", precision = 15, scale = 2)
     private BigDecimal costPrice;
+
+    @Column(name = "selling_price", precision = 15, scale = 2)
+    private BigDecimal sellingPrice;
 
     @Column(length = 100)
     private String category;
@@ -57,6 +67,10 @@ public class InventoryItem {
     private Instant deletedAt;
 
     public boolean isLowStock() {
-        return quantity.compareTo(minQuantity) <= 0;
+        return quantity.compareTo(minQuantity) <= 0 && quantity.compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    public boolean isOutOfStock() {
+        return quantity.compareTo(BigDecimal.ZERO) <= 0;
     }
 }

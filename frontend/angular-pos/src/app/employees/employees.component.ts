@@ -1,7 +1,8 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeRequest } from '../core/services/user.service';
+import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
 
 @Component({
   selector: 'app-employees',
@@ -43,6 +44,7 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
                 <th>Xodim (F.I.Sh)</th>
                 <th>Login (Username)</th>
                 <th>Lavozim (Rol)</th>
+                <th>Oshxonalar</th>
                 <th>Telefon</th>
                 <th>Holati</th>
                 <th style="text-align: right;">Amallar</th>
@@ -66,6 +68,14 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
                   <span class="role-badge" [ngClass]="emp.role?.toLowerCase()">
                     {{ getRoleLabel(emp.role) }}
                   </span>
+                </td>
+                <td>
+                  <div class="kitchen-chips" *ngIf="emp.kitchens && emp.kitchens.length > 0">
+                    <span *ngFor="let k of emp.kitchens" class="kitchen-chip">
+                      🍳 {{ k.name }}
+                    </span>
+                  </div>
+                  <span *ngIf="!emp.kitchens || emp.kitchens.length === 0" class="text-muted">—</span>
                 </td>
                 <td>{{ emp.phone || '—' }}</td>
                 <td>
@@ -142,7 +152,7 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
 
             <div class="form-group">
               <label class="form-label">Lavozim (Rol) *</label>
-              <select [(ngModel)]="createData.role" class="pos-input">
+              <select [(ngModel)]="createData.role" class="pos-input" (change)="onRoleChange('create')">
                 <option value="ADMIN">Admin (Boshqaruvchi)</option>
                 <option value="MANAGER">Menejer</option>
                 <option value="WAITER">Ofitsiant</option>
@@ -155,6 +165,28 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
               <label class="form-label">Telefon raqam</label>
               <input type="text" [(ngModel)]="createData.phone" class="pos-input" placeholder="+998 90 123-45-67" />
             </div>
+
+            <!-- Multi-select Kitchens for KITCHEN role -->
+            <div class="form-group full-width" *ngIf="createData.role === 'KITCHEN'">
+              <label class="form-label">Biriktiriladigan Oshxonalar *</label>
+              <p class="field-hint">Kamida bitta oshxona tanlanishi shart (bir yoki bir nechta)</p>
+              <div class="kitchen-checkbox-grid">
+                <label *ngFor="let k of kitchens" class="kitchen-check-card" [class.selected]="isKitchenSelected(k.id, 'create')">
+                  <input
+                    type="checkbox"
+                    [checked]="isKitchenSelected(k.id, 'create')"
+                    (change)="toggleKitchen(k.id, 'create')"
+                  />
+                  <div class="kitchen-check-info">
+                    <span class="kitchen-check-name">{{ k.name }}</span>
+                    <span class="kitchen-check-code">{{ k.code }}</span>
+                  </div>
+                </label>
+              </div>
+              <div *ngIf="createKitchenError" class="validation-error">
+                ⚠️ Oshpaz kamida bitta oshxonaga biriktirilishi kerak.
+              </div>
+            </div>
           </div>
 
           <div class="modal-footer">
@@ -162,7 +194,7 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
             <button
               class="pos-btn pos-btn--primary"
               (click)="saveCreate()"
-              [disabled]="saving || !createData.username || !createData.password || !createData.firstName">
+              [disabled]="saving || !createData.username || !createData.password || !createData.firstName || (createData.role === 'KITCHEN' && selectedCreateKitchenIds.size === 0)">
               <span>{{ saving ? 'Saqlanmoqda...' : 'Saqlash' }}</span>
             </button>
           </div>
@@ -192,7 +224,7 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
 
             <div class="form-group">
               <label class="form-label">Lavozim (Rol) *</label>
-              <select [(ngModel)]="editData.role" class="pos-input">
+              <select [(ngModel)]="editData.role" class="pos-input" (change)="onRoleChange('edit')">
                 <option value="ADMIN">Admin (Boshqaruvchi)</option>
                 <option value="MANAGER">Menejer</option>
                 <option value="WAITER">Ofitsiant</option>
@@ -205,6 +237,28 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
               <label class="form-label">Telefon raqam</label>
               <input type="text" [(ngModel)]="editData.phone" class="pos-input" />
             </div>
+
+            <!-- Multi-select Kitchens for KITCHEN role in Edit Modal -->
+            <div class="form-group full-width" *ngIf="editData.role === 'KITCHEN'">
+              <label class="form-label">Biriktirilgan Oshxonalar *</label>
+              <p class="field-hint">Kamida bitta oshxona tanlanishi shart (bir yoki bir nechta)</p>
+              <div class="kitchen-checkbox-grid">
+                <label *ngFor="let k of kitchens" class="kitchen-check-card" [class.selected]="isKitchenSelected(k.id, 'edit')">
+                  <input
+                    type="checkbox"
+                    [checked]="isKitchenSelected(k.id, 'edit')"
+                    (change)="toggleKitchen(k.id, 'edit')"
+                  />
+                  <div class="kitchen-check-info">
+                    <span class="kitchen-check-name">{{ k.name }}</span>
+                    <span class="kitchen-check-code">{{ k.code }}</span>
+                  </div>
+                </label>
+              </div>
+              <div *ngIf="editKitchenError" class="validation-error">
+                ⚠️ Oshpaz kamida bitta oshxonaga biriktirilishi kerak.
+              </div>
+            </div>
           </div>
 
           <div class="modal-footer">
@@ -212,7 +266,7 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
             <button
               class="pos-btn pos-btn--primary"
               (click)="saveEdit()"
-              [disabled]="saving || !editData.firstName">
+              [disabled]="saving || !editData.firstName || (editData.role === 'KITCHEN' && selectedEditKitchenIds.size === 0)">
               <span>{{ saving ? 'Saqlanmoqda...' : 'Saqlash' }}</span>
             </button>
           </div>
@@ -468,6 +522,94 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
       border-top: 1px solid var(--border);
     }
 
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin: -2px 0 4px 0;
+    }
+
+    .kitchen-checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .kitchen-check-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+
+      &:hover {
+        background: var(--bg-hover);
+        border-color: var(--primary-light);
+      }
+
+      &.selected {
+        background: rgba(245, 158, 11, 0.12);
+        border-color: #f59e0b;
+      }
+
+      input[type="checkbox"] {
+        accent-color: #f59e0b;
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+      }
+    }
+
+    .kitchen-check-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .kitchen-check-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .kitchen-check-code {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .validation-error {
+      font-size: 12px;
+      color: #ef4444;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    .kitchen-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .kitchen-chip {
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 2px 8px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+
     .loading-state, .empty-state {
       padding: 50px 20px;
       text-align: center;
@@ -496,8 +638,15 @@ import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeReque
 })
 export class EmployeesComponent implements OnInit {
   employees: Employee[] = [];
+  kitchens: KitchenStation[] = [];
   loading = false;
   saving = false;
+
+  // Multi-select kitchen sets
+  selectedCreateKitchenIds = new Set<string>();
+  selectedEditKitchenIds = new Set<string>();
+  createKitchenError = false;
+  editKitchenError = false;
 
   // Modals
   showCreateModal = false;
@@ -511,36 +660,97 @@ export class EmployeesComponent implements OnInit {
     firstName: '',
     lastName: '',
     phone: '',
-    role: 'WAITER'
+    role: 'WAITER',
+    kitchenIds: []
   };
 
   editData: UpdateEmployeeRequest = {
     firstName: '',
     lastName: '',
     phone: '',
-    role: 'WAITER'
+    role: 'WAITER',
+    kitchenIds: []
   };
 
   newPassword = '';
 
-  constructor(private userService: UserService) {}
+  constructor(
+    private userService: UserService,
+    private kitchenService: KitchenService,
+    private cdr: ChangeDetectorRef
+  ) {}
 
   ngOnInit(): void {
     this.loadEmployees();
+    this.loadKitchens();
+  }
+
+  loadKitchens(): void {
+    this.kitchenService.getKitchens().subscribe({
+      next: (res) => {
+        this.kitchens = res.data || [];
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        console.error('Failed to load kitchens', err);
+      }
+    });
   }
 
   loadEmployees(): void {
     this.loading = true;
+    this.cdr.markForCheck();
     this.userService.getUsers().subscribe({
       next: (res) => {
         this.employees = res.data || [];
         this.loading = false;
+        this.cdr.markForCheck();
       },
       error: (err) => {
         console.error('Failed to load employees', err);
         this.loading = false;
+        this.cdr.markForCheck();
       }
     });
+  }
+
+  onRoleChange(mode: 'create' | 'edit'): void {
+    if (mode === 'create') {
+      if (this.createData.role === 'KITCHEN') {
+        this.createKitchenError = this.selectedCreateKitchenIds.size === 0;
+      } else {
+        this.createKitchenError = false;
+      }
+    } else {
+      if (this.editData.role === 'KITCHEN') {
+        this.editKitchenError = this.selectedEditKitchenIds.size === 0;
+      } else {
+        this.editKitchenError = false;
+      }
+    }
+    this.cdr.markForCheck();
+  }
+
+  toggleKitchen(kitchenId: string, mode: 'create' | 'edit'): void {
+    const targetSet = mode === 'create' ? this.selectedCreateKitchenIds : this.selectedEditKitchenIds;
+    if (targetSet.has(kitchenId)) {
+      targetSet.delete(kitchenId);
+    } else {
+      targetSet.add(kitchenId);
+    }
+
+    if (mode === 'create') {
+      this.createKitchenError = this.createData.role === 'KITCHEN' && targetSet.size === 0;
+    } else {
+      this.editKitchenError = this.editData.role === 'KITCHEN' && targetSet.size === 0;
+    }
+    this.cdr.markForCheck();
+  }
+
+  isKitchenSelected(kitchenId: string, mode: 'create' | 'edit'): boolean {
+    return mode === 'create'
+      ? this.selectedCreateKitchenIds.has(kitchenId)
+      : this.selectedEditKitchenIds.has(kitchenId);
   }
 
   getInitials(emp: Employee): string {
@@ -567,27 +777,37 @@ export class EmployeesComponent implements OnInit {
       firstName: '',
       lastName: '',
       phone: '',
-      role: 'WAITER'
+      role: 'WAITER',
+      kitchenIds: []
     };
+    this.selectedCreateKitchenIds.clear();
+    this.createKitchenError = false;
     this.showCreateModal = true;
+    this.cdr.markForCheck();
   }
 
   openEditModal(emp: Employee): void {
     this.selectedEmp = emp;
+    const empKitchenIds = emp.kitchenIds || emp.kitchens?.map(k => k.id) || [];
     this.editData = {
       firstName: emp.firstName,
       lastName: emp.lastName,
       phone: emp.phone,
       role: emp.role || 'WAITER',
-      active: emp.active
+      active: emp.active,
+      kitchenIds: [...empKitchenIds]
     };
+    this.selectedEditKitchenIds = new Set<string>(empKitchenIds);
+    this.editKitchenError = false;
     this.showEditModal = true;
+    this.cdr.markForCheck();
   }
 
   openResetPasswordModal(emp: Employee): void {
     this.selectedEmp = emp;
     this.newPassword = '';
     this.showPasswordModal = true;
+    this.cdr.markForCheck();
   }
 
   closeModals(): void {
@@ -595,10 +815,24 @@ export class EmployeesComponent implements OnInit {
     this.showEditModal = false;
     this.showPasswordModal = false;
     this.selectedEmp = null;
+    this.cdr.markForCheck();
   }
 
   saveCreate(): void {
+    if (this.createData.role === 'KITCHEN') {
+      this.createData.kitchenIds = Array.from(this.selectedCreateKitchenIds);
+      if (this.createData.kitchenIds.length === 0) {
+        this.createKitchenError = true;
+        this.cdr.markForCheck();
+        alert('Oshpaz kamida bitta oshxonaga biriktirilishi kerak.');
+        return;
+      }
+    } else {
+      this.createData.kitchenIds = [];
+    }
+
     this.saving = true;
+    this.cdr.markForCheck();
     this.userService.createUser(this.createData).subscribe({
       next: () => {
         this.saving = false;
@@ -607,6 +841,7 @@ export class EmployeesComponent implements OnInit {
       },
       error: (err) => {
         this.saving = false;
+        this.cdr.markForCheck();
         alert('Xatolik: ' + (err.error?.message || err.message));
       }
     });
@@ -614,7 +849,20 @@ export class EmployeesComponent implements OnInit {
 
   saveEdit(): void {
     if (!this.selectedEmp) return;
+    if (this.editData.role === 'KITCHEN') {
+      this.editData.kitchenIds = Array.from(this.selectedEditKitchenIds);
+      if (this.editData.kitchenIds.length === 0) {
+        this.editKitchenError = true;
+        this.cdr.markForCheck();
+        alert('Oshpaz kamida bitta oshxonaga biriktirilishi kerak.');
+        return;
+      }
+    } else {
+      this.editData.kitchenIds = [];
+    }
+
     this.saving = true;
+    this.cdr.markForCheck();
     this.userService.updateUser(this.selectedEmp.id, this.editData).subscribe({
       next: () => {
         this.saving = false;
@@ -623,6 +871,7 @@ export class EmployeesComponent implements OnInit {
       },
       error: (err) => {
         this.saving = false;
+        this.cdr.markForCheck();
         alert('Xatolik: ' + (err.error?.message || err.message));
       }
     });
@@ -631,6 +880,7 @@ export class EmployeesComponent implements OnInit {
   savePassword(): void {
     if (!this.selectedEmp || !this.newPassword) return;
     this.saving = true;
+    this.cdr.markForCheck();
     this.userService.resetPassword(this.selectedEmp.id, this.newPassword).subscribe({
       next: () => {
         this.saving = false;
@@ -639,6 +889,7 @@ export class EmployeesComponent implements OnInit {
       },
       error: (err) => {
         this.saving = false;
+        this.cdr.markForCheck();
         alert('Xatolik: ' + (err.error?.message || err.message));
       }
     });
@@ -657,8 +908,12 @@ export class EmployeesComponent implements OnInit {
     this.userService.updateUser(emp.id, req).subscribe({
       next: () => {
         emp.active = updatedStatus;
+        this.cdr.markForCheck();
       },
-      error: (err) => alert('Statusni o‘zgartirishda xatolik: ' + (err.error?.message || err.message))
+      error: (err) => {
+        this.cdr.markForCheck();
+        alert('Statusni o‘zgartirishda xatolik: ' + (err.error?.message || err.message));
+      }
     });
   }
 }

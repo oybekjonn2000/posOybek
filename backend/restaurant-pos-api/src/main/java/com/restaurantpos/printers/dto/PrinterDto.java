@@ -15,6 +15,18 @@ public class PrinterDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class AvailablePrinterDto {
+        private String systemPrinterName;
+        private String displayName;
+        private String driverName;
+        private boolean isDefault;
+        private String status;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Response {
         private UUID id;
         private String name;
@@ -23,6 +35,7 @@ public class PrinterDto {
         private String ipAddress;
         private Integer port;
         private String windowsPrinterName;
+        private String systemPrinterName;
         private int paperWidth;
         private String characterEncoding;
         private String purpose;
@@ -39,27 +52,27 @@ public class PrinterDto {
         private Instant lastSuccessfulPrintAt;
         private String lastError;
         private Instant createdAt;
+
+        public String getSystemPrinterName() {
+            return systemPrinterName != null ? systemPrinterName : windowsPrinterName;
+        }
     }
 
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CreateRequest {
-        @NotBlank(message = "Printer nomi kiritilishi shart")
         private String name;
-
         private String model;
-
-        @NotBlank(message = "Ulanish turi kiritilishi shart (WINDOWS, USB, NETWORK, TCP/IP)")
-        private String connectionType;
-
+        private String systemPrinterName;
+        private String windowsPrinterName;
+        private String connectionType = "WINDOWS";
         private String ipAddress;
         private Integer port = 9100;
-        private String windowsPrinterName;
         private Integer paperWidth = 80;
         private String characterEncoding = "UTF-8";
 
-        @NotBlank(message = "Printer maqsadi kiritilishi shart (KITCHEN, CASHIER, RECEIPT, BAR, OTHER)")
+        @NotBlank(message = "Printer maqsadi kiritilishi shart (KITCHEN, CASHIER, RECEIPT, OTHER)")
         private String purpose;
 
         private Boolean autoPrint = true;
@@ -67,6 +80,16 @@ public class PrinterDto {
         private Boolean isPrimary = true;
         private UUID fallbackPrinterId;
         private UUID kitchenId;
+
+        public String getResolvedSystemPrinterName() {
+            if (systemPrinterName != null && !systemPrinterName.trim().isBlank()) {
+                return systemPrinterName.trim();
+            }
+            if (windowsPrinterName != null && !windowsPrinterName.trim().isBlank()) {
+                return windowsPrinterName.trim();
+            }
+            return null;
+        }
     }
 
     @Data
@@ -75,10 +98,11 @@ public class PrinterDto {
     public static class UpdateRequest {
         private String name;
         private String model;
+        private String systemPrinterName;
+        private String windowsPrinterName;
         private String connectionType;
         private String ipAddress;
         private Integer port;
-        private String windowsPrinterName;
         private Integer paperWidth;
         private String characterEncoding;
         private String purpose;
@@ -89,6 +113,16 @@ public class PrinterDto {
         private Boolean isPrimary;
         private UUID fallbackPrinterId;
         private UUID kitchenId;
+
+        public String getResolvedSystemPrinterName() {
+            if (systemPrinterName != null && !systemPrinterName.trim().isBlank()) {
+                return systemPrinterName.trim();
+            }
+            if (windowsPrinterName != null && !windowsPrinterName.trim().isBlank()) {
+                return windowsPrinterName.trim();
+            }
+            return null;
+        }
     }
 
     @Data

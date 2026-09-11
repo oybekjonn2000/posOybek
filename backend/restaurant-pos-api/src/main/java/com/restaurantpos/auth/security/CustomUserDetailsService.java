@@ -45,10 +45,16 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         String role = user.getRoles().isEmpty() ? "STAFF" : user.getRoles().iterator().next().getName();
 
+        Set<UUID> kitchenIds = user.getKitchens().stream()
+                .map(com.restaurantpos.kitchen.entity.Kitchen::getId)
+                .collect(Collectors.toSet());
+        UUID primaryKitchenId = kitchenIds.isEmpty() ? null : kitchenIds.iterator().next();
+
         return UserPrincipal.builder()
                 .userId(user.getId())
                 .tenantId(user.getTenant().getId())
-                .kitchenId(user.getKitchen() != null ? user.getKitchen().getId() : null)
+                .kitchenId(primaryKitchenId)
+                .kitchenIds(kitchenIds)
                 .username(user.getUsername())
                 .password(user.getPasswordHash())
                 .firstName(user.getFirstName())

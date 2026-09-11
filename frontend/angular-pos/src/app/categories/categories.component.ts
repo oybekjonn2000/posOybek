@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CategoryService, Category, CreateCategoryRequest } from '../core/services/category.service';
@@ -559,7 +559,8 @@ export class CategoriesComponent implements OnInit {
 
   constructor(
     private categoryService: CategoryService,
-    private kitchenService: KitchenService
+    private kitchenService: KitchenService,
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
@@ -568,13 +569,16 @@ export class CategoriesComponent implements OnInit {
 
   loadData(): void {
     this.loading = true;
+    this.cdr.markForCheck();
     this.kitchenService.getKitchens().subscribe({
       next: (kRes) => {
         this.kitchens = kRes.data || [];
+        this.cdr.markForCheck();
         this.loadCategories();
       },
       error: (err) => {
         console.error('Failed to load kitchens', err);
+        this.cdr.markForCheck();
         this.loadCategories();
       }
     });
@@ -585,10 +589,12 @@ export class CategoriesComponent implements OnInit {
       next: (res) => {
         this.categories = res.data || [];
         this.loading = false;
+        this.cdr.markForCheck();
       },
       error: (err) => {
         console.error('Failed to load categories', err);
         this.loading = false;
+        this.cdr.markForCheck();
       }
     });
   }
@@ -638,6 +644,7 @@ export class CategoriesComponent implements OnInit {
       active: true
     };
     this.showModal = true;
+    this.cdr.markForCheck();
   }
 
   openEditModal(cat: Category): void {
@@ -652,23 +659,27 @@ export class CategoriesComponent implements OnInit {
       active: cat.active !== false
     };
     this.showModal = true;
+    this.cdr.markForCheck();
   }
 
   onKitchenSelected(): void {
     if (this.formData.kitchenId) {
       this.kitchenError = false;
+      this.cdr.markForCheck();
     }
   }
 
   closeModal(): void {
     this.showModal = false;
     this.kitchenError = false;
+    this.cdr.markForCheck();
   }
 
   saveCategory(): void {
     if (!this.formData.kitchenId) {
       this.kitchenError = true;
       alert('Oshxona tanlanishi kerak!');
+      this.cdr.markForCheck();
       return;
     }
 
@@ -678,6 +689,7 @@ export class CategoriesComponent implements OnInit {
     }
 
     this.saving = true;
+    this.cdr.markForCheck();
     if (this.isEditing && this.editingId) {
       this.categoryService.updateCategory(this.editingId, this.formData).subscribe({
         next: () => {
@@ -687,6 +699,7 @@ export class CategoriesComponent implements OnInit {
         },
         error: (err) => {
           this.saving = false;
+          this.cdr.markForCheck();
           alert('Xatolik: ' + (err.error?.message || err.message));
         }
       });
@@ -699,6 +712,7 @@ export class CategoriesComponent implements OnInit {
         },
         error: (err) => {
           this.saving = false;
+          this.cdr.markForCheck();
           alert('Xatolik: ' + (err.error?.message || err.message));
         }
       });
@@ -714,6 +728,7 @@ export class CategoriesComponent implements OnInit {
         this.loadCategories();
       },
       error: (err) => {
+        this.cdr.markForCheck();
         alert('O‘chirishda xatolik:\n' + (err.error?.message || err.message));
       }
     });

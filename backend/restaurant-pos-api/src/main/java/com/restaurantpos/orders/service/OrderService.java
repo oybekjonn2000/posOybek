@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import java.util.UUID;
@@ -210,6 +211,27 @@ public class OrderService {
             }
         }
 
+        if (table != null && table.getCurrentOrderId() != null) {
+            Optional<Order> existingOrderOpt = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(table.getCurrentOrderId(), tenantId);
+            if (existingOrderOpt.isPresent()) {
+                Order existingOrder = existingOrderOpt.get();
+                if (existingOrder.getStatus() != Order.OrderStatus.PAID && existingOrder.getStatus() != Order.OrderStatus.CANCELLED) {
+                    log.info("Table '{}' already has active order '{}'. Merging items into existing order.", table.getName(), existingOrder.getOrderNumber());
+                    if (request.getItems() != null) {
+                        for (OrderDto.ItemRequest itemReq : request.getItems()) {
+                            mergeOrAddItem(existingOrder, itemReq, tenantId);
+                        }
+                        existingOrder.recalculateTotals();
+                    }
+                    routeOrderToKitchens(existingOrder, tenant);
+                    Order savedExisting = orderRepository.save(existingOrder);
+                    wsNotification.notifyOrderStatusChanged(tenantId, toResponse(savedExisting));
+                    wsNotification.notifyTableUpdated(tenantId, toTableResponse(table, savedExisting));
+                    return toResponse(savedExisting);
+                }
+            }
+        }
+
         Customer customer = null;
         if (request.getCustomerId() != null) {
             customer = customerRepository.findById(request.getCustomerId()).orElse(null);
@@ -233,8 +255,7 @@ public class OrderService {
 
         if (request.getItems() != null && !request.getItems().isEmpty()) {
             for (OrderDto.ItemRequest itemReq : request.getItems()) {
-                OrderItem item = buildOrderItem(order, itemReq, tenantId);
-                order.getItems().add(item);
+                mergeOrAddItem(order, itemReq, tenantId);
             }
         }
 
@@ -258,6 +279,42 @@ public class OrderService {
         return toResponse(saved);
     }
 
+    private void mergeOrAddItem(Order order, OrderDto.ItemRequest itemReq, UUID tenantId) {
+        if (itemReq.getProductId() == null || itemReq.getQuantity() == null || itemReq.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        // Search for existing non-voided item with same product ID
+        Optional<OrderItem> existingOpt = order.getItems().stream()
+                .filter(i -> !i.isVoided() && i.getProduct() != null && i.getProduct().getId().equals(itemReq.getProductId()))
+                .findFirst();
+
+        if (existingOpt.isPresent()) {
+            OrderItem existing = existingOpt.get();
+            existing.setQuantity(existing.getQuantity().add(itemReq.getQuantity()));
+            if (itemReq.getNotes() != null && !itemReq.getNotes().isBlank()) {
+                String newNote = itemReq.getNotes().trim();
+                if (existing.getNotes() == null || existing.getNotes().isBlank()) {
+                    existing.setNotes(newNote);
+                } else if (!existing.getNotes().contains(newNote)) {
+                    existing.setNotes(existing.getNotes() + "; " + newNote);
+                }
+            }
+            existing.calculateSubtotal();
+            // Update kitchen status: if partially or previously sent, set to PARTIALLY_SENT
+            if (existing.getSentQuantity() != null && existing.getSentQuantity().compareTo(BigDecimal.ZERO) > 0) {
+                if (existing.getSentQuantity().compareTo(existing.getQuantity()) < 0) {
+                    existing.setKitchenStatus(OrderItem.KitchenStatus.PARTIALLY_SENT);
+                }
+            } else {
+                existing.setKitchenStatus(OrderItem.KitchenStatus.NEW);
+            }
+        } else {
+            OrderItem newItem = buildOrderItem(order, itemReq, tenantId);
+            order.getItems().add(newItem);
+        }
+    }
+
     @Transactional
     public OrderDto.Response addItemsToOrder(UUID orderId, UUID tenantId, OrderDto.AddItemsRequest request) {
         return addItemsToOrder(orderId, tenantId, null, request);
@@ -274,8 +331,7 @@ public class OrderService {
         }
 
         for (OrderDto.ItemRequest itemReq : request.getItems()) {
-            OrderItem item = buildOrderItem(order, itemReq, tenantId);
-            order.getItems().add(item);
+            mergeOrAddItem(order, itemReq, tenantId);
         }
 
         order.recalculateTotals();
@@ -486,6 +542,9 @@ public class OrderService {
                 .changeAmount(changeAmount)
                 .items(items)
                 .version(order.getVersion())
+                .receiptPrintStatus(order.getReceiptPrintStatus() != null ? order.getReceiptPrintStatus().name() : Order.ReceiptPrintStatus.NOT_PRINTED.name())
+                .receiptPrintedAt(order.getReceiptPrintedAt())
+                .receiptPrintError(order.getReceiptPrintError())
                 .build();
     }
 
@@ -505,19 +564,18 @@ public class OrderService {
         }
 
 
-        // 1. If request has new items, build and add them with status NEW
+        // 1. If request has new items, merge them
         if (request != null && request.getItems() != null && !request.getItems().isEmpty()) {
             for (OrderDto.ItemRequest itemReq : request.getItems()) {
-                OrderItem item = buildOrderItem(order, itemReq, tenantId);
-                order.getItems().add(item);
+                mergeOrAddItem(order, itemReq, tenantId);
             }
             order.recalculateTotals();
         }
 
         // 2. Filter strictly for items that need to be sent:
-        // status == NEW, not voided, quantity > 0
+        // remaining quantity > 0, not voided, kitchen != null
         List<OrderItem> itemsToSend = order.getItems().stream()
-                .filter(i -> !i.isVoided() && i.getKitchenStatus() == OrderItem.KitchenStatus.NEW && i.getKitchen() != null)
+                .filter(i -> !i.isVoided() && i.getRemainingQuantity().compareTo(BigDecimal.ZERO) > 0 && i.getKitchen() != null)
                 .collect(Collectors.toList());
 
         if (itemsToSend.isEmpty()) {
@@ -543,7 +601,7 @@ public class OrderService {
             ticket.setNotes(order.getKitchenNotes() != null ? order.getKitchenNotes() : order.getNotes());
             kitchenTicketRepository.save(ticket);
 
-            // Targeted WebSocket notification: ONLY newly sent items for this specific kitchen
+            // Targeted WebSocket notification: ONLY newly sent items for this specific kitchen with remainingQuantity
             OrderDto.Response kitchenPayload = buildKitchenOrderPayload(order, kitchen.getId(), kitchenItems);
             wsNotification.notifyKitchenNewTicket(kitchen.getId(), kitchenPayload);
         }
@@ -555,7 +613,7 @@ public class OrderService {
             log.warn("Printer dispatch warning: {}", pex.getMessage());
         }
 
-        // 4. Transition newly sent items: NEW -> SENT_TO_KITCHEN
+        // 4. Transition newly sent items: sentQuantity = quantity, SENT_TO_KITCHEN
         for (OrderItem item : itemsToSend) {
             item.setKitchenStatus(OrderItem.KitchenStatus.SENT_TO_KITCHEN);
             item.setSentToKitchenAt(now);
@@ -584,9 +642,9 @@ public class OrderService {
             return;
         }
 
-        // Filter strictly ONLY NEW and non-voided items!
+        // Filter strictly ONLY items with remainingQuantity > 0 and non-voided!
         List<OrderItem> newItems = order.getItems().stream()
-                .filter(i -> !i.isVoided() && i.getKitchenStatus() == OrderItem.KitchenStatus.NEW && i.getKitchen() != null)
+                .filter(i -> !i.isVoided() && i.getRemainingQuantity().compareTo(BigDecimal.ZERO) > 0 && i.getKitchen() != null)
                 .collect(Collectors.toList());
 
         if (newItems.isEmpty()) {
@@ -642,7 +700,14 @@ public class OrderService {
     private OrderDto.Response buildKitchenOrderPayload(Order order, UUID kitchenId, List<OrderItem> kitchenItems) {
         OrderDto.Response resp = toResponse(order);
         List<OrderDto.ItemResponse> filtered = kitchenItems.stream()
-                .map(this::toItemResponse)
+                .map(i -> {
+                    OrderDto.ItemResponse ir = toItemResponse(i);
+                    BigDecimal rem = i.getRemainingQuantity();
+                    if (rem.compareTo(BigDecimal.ZERO) > 0) {
+                        ir.setQuantity(rem);
+                    }
+                    return ir;
+                })
                 .collect(Collectors.toList());
         resp.setItems(filtered);
         return resp;
@@ -671,9 +736,17 @@ public class OrderService {
             ).collect(Collectors.toList());
         }
 
-        BigDecimal remaining = (i.getQuantity() != null && i.getSentQuantity() != null)
-                ? i.getQuantity().subtract(i.getSentQuantity()).max(BigDecimal.ZERO)
-                : (i.getKitchenStatus() == OrderItem.KitchenStatus.NEW ? i.getQuantity() : BigDecimal.ZERO);
+        BigDecimal remaining = i.getRemainingQuantity();
+        String kitchenStatusStr;
+        if (i.isVoided()) {
+            kitchenStatusStr = OrderItem.KitchenStatus.CANCELLED.name();
+        } else if (i.getSentQuantity() == null || i.getSentQuantity().compareTo(BigDecimal.ZERO) == 0) {
+            kitchenStatusStr = OrderItem.KitchenStatus.NEW.name();
+        } else if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+            kitchenStatusStr = OrderItem.KitchenStatus.PARTIALLY_SENT.name();
+        } else {
+            kitchenStatusStr = i.getKitchenStatus() != null ? i.getKitchenStatus().name() : OrderItem.KitchenStatus.SENT_TO_KITCHEN.name();
+        }
 
         return OrderDto.ItemResponse.builder()
                 .id(i.getId())
@@ -687,7 +760,7 @@ public class OrderService {
                 .discountAmount(i.getDiscountAmount())
                 .subtotal(i.getSubtotal())
                 .notes(i.getNotes())
-                .kitchenStatus(i.getKitchenStatus() != null ? i.getKitchenStatus().name() : null)
+                .kitchenStatus(kitchenStatusStr)
                 .sentQuantity(i.getSentQuantity() != null ? i.getSentQuantity() : BigDecimal.ZERO)
                 .deliveredQuantity(i.getDeliveredQuantity() != null ? i.getDeliveredQuantity() : BigDecimal.ZERO)
                 .cancelledQuantity(i.getCancelledQuantity() != null ? i.getCancelledQuantity() : BigDecimal.ZERO)
@@ -747,6 +820,19 @@ public class OrderService {
 
             item.setQuantity(remainingQty);
             item.calculateSubtotal();
+
+            // Adjust sentQuantity if cancelQty exceeded the unsent portion
+            BigDecimal currentSent = item.getSentQuantity() != null ? item.getSentQuantity() : BigDecimal.ZERO;
+            BigDecimal newSent = currentSent.min(remainingQty);
+            item.setSentQuantity(newSent);
+
+            if (newSent.compareTo(BigDecimal.ZERO) == 0) {
+                item.setKitchenStatus(OrderItem.KitchenStatus.NEW);
+            } else if (newSent.compareTo(remainingQty) < 0) {
+                item.setKitchenStatus(OrderItem.KitchenStatus.PARTIALLY_SENT);
+            } else {
+                item.setKitchenStatus(OrderItem.KitchenStatus.SENT_TO_KITCHEN);
+            }
 
             OrderItem voidedPortion = new OrderItem();
             voidedPortion.setOrder(order);
@@ -848,6 +934,23 @@ public class OrderService {
             wsPayload.put("order", toKitchenOrderPayload(saved, item.getKitchen().getId()));
 
             wsNotification.notifyKitchenItemCancelled(item.getKitchen().getId(), wsPayload);
+        }
+
+        // Hardware Print Routing: dispatch cancellation ticket to the kitchen's assigned printer
+        if (item.getKitchen() != null) {
+            try {
+                printRoutingService.routeAndPrintKitchenCancellation(
+                        saved,
+                        item.getKitchen(),
+                        item.getProductName(),
+                        cancelQty,
+                        reason,
+                        savedReceipt.getCancelledByName(),
+                        savedReceipt.getReceiptNumber()
+                );
+            } catch (Exception pex) {
+                log.warn("Kitchen cancellation printer dispatch warning: {}", pex.getMessage());
+            }
         }
 
         // Global POS / Orders WebSocket Notification (/topic/orders/{tenantId})
@@ -957,6 +1060,18 @@ public class OrderService {
             wsPayload.put("order", toKitchenOrderPayload(saved, kitchen.getId()));
 
             wsNotification.notifyKitchenOrderCancelled(kitchen.getId(), wsPayload);
+        }
+
+        // Hardware Print Routing: dispatch cancellation tickets to all affected kitchens
+        try {
+            printRoutingService.routeAndPrintFullOrderCancellation(
+                    saved,
+                    reason,
+                    savedReceipt.getCancelledByName(),
+                    savedReceipt.getReceiptNumber()
+            );
+        } catch (Exception pex) {
+            log.warn("Full order cancellation printer dispatch warning: {}", pex.getMessage());
         }
 
         // Global POS / Orders WebSocket Notification

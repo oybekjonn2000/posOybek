@@ -133,8 +133,15 @@ public class OrderItem {
         this.subtotal = gross.subtract(discountAmount);
     }
 
+    public BigDecimal getRemainingQuantity() {
+        BigDecimal q = quantity != null ? quantity : BigDecimal.ZERO;
+        BigDecimal s = sentQuantity != null ? sentQuantity : BigDecimal.ZERO;
+        return q.subtract(s).max(BigDecimal.ZERO);
+    }
+
     public enum KitchenStatus {
         NEW,
+        PARTIALLY_SENT,
         SENT_TO_KITCHEN,
         ACCEPTED,
         PREPARING,

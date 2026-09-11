@@ -20,14 +20,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.OutputStream;
-import java.math.BigDecimal;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -42,7 +35,13 @@ public class PrintRoutingService {
     private final OrderRepository orderRepository;
     private final PaymentRepository paymentRepository;
     private final AppSettingRepository appSettingRepository;
+    private final KitchenPrintService kitchenPrintService;
+    private final ReceiptPrintService receiptPrintService;
 
+    /**
+     * Dispatches order items to their respective kitchen station primary printers.
+     * CRITICAL: Printer errors or unassigned printers MUST NEVER abort or roll back the order.
+     */
     @Async
     @Transactional
     public void routeAndPrintKitchenTickets(Order order, List<OrderItem> items) {
@@ -59,7 +58,7 @@ public class PrintRoutingService {
             List<OrderItem> kitchenItems = entry.getValue();
 
             if (!kitchen.isAutoPrint()) {
-                log.info("Kitchen {} auto_print is OFF. Skipping ticket print.", kitchen.getName());
+                log.info("Kitchen '{}' auto_print is OFF. Skipping ticket print.", kitchen.getName());
                 continue;
             }
 
@@ -67,14 +66,14 @@ public class PrintRoutingService {
                     .findByTenantIdAndKitchenIdAndPrimaryTrueAndActiveTrueAndDeletedAtIsNull(tenantId, kitchen.getId());
 
             if (assignment.isEmpty()) {
-                log.warn("Print Routing: {} oshxonasiga birlamchi printer biriktirilmagan! Buyurtma paneldan ko'rinadi.",
+                log.warn("Print Routing: '{}' oshxonasiga birlamchi printer biriktirilmagan! Buyurtma paneldan ko'rinadi.",
                         kitchen.getName());
                 continue;
             }
 
             Printer printer = assignment.get().getPrinter();
             if (!printer.isAutoPrint() || !printer.isActive()) {
-                log.info("Printer {} is inactive or auto_print is disabled.", printer.getName());
+                log.info("Printer '{}' is inactive or auto_print is disabled.", printer.getName());
                 continue;
             }
 
@@ -82,31 +81,145 @@ public class PrintRoutingService {
         }
     }
 
+    /**
+     * Routes single item cancellation ticket to the respective kitchen printer.
+     */
     @Async
     @Transactional
-    public void routeAndPrintReceipt(Order order, Payment payment) {
+    public void routeAndPrintKitchenCancellation(Order order, Kitchen kitchen, String productName,
+                                                 java.math.BigDecimal quantity, String reason,
+                                                 String cancelledByName, String receiptNumber) {
+        if (kitchen == null) return;
         UUID tenantId = order.getTenant().getId();
 
-        // 1. Check autoPrint setting in payments
+        Printer printer = resolveKitchenPrinter(tenantId, kitchen);
+        if (printer == null) {
+            log.warn("Print Routing: '{}' oshxonasi uchun faol printer topilmadi! Bekor cheki chop etilmadi.",
+                    kitchen.getName());
+            return;
+        }
+
+        printKitchenCancellationSafely(printer, order, kitchen, productName, quantity, reason, cancelledByName, receiptNumber);
+    }
+
+    /**
+     * Routes entire order cancellation to all affected kitchens' printers.
+     */
+    @Async
+    @Transactional
+    public void routeAndPrintFullOrderCancellation(Order order, String reason,
+                                                   String cancelledByName, String receiptNumber) {
+        if (order.getItems() == null || order.getItems().isEmpty()) return;
+
+        Map<Kitchen, List<OrderItem>> byKitchen = order.getItems().stream()
+                .filter(i -> i.getKitchen() != null)
+                .collect(Collectors.groupingBy(OrderItem::getKitchen));
+
+        UUID tenantId = order.getTenant().getId();
+
+        for (Map.Entry<Kitchen, List<OrderItem>> entry : byKitchen.entrySet()) {
+            Kitchen kitchen = entry.getKey();
+            List<OrderItem> kitchenItems = entry.getValue();
+
+            Printer printer = resolveKitchenPrinter(tenantId, kitchen);
+            if (printer == null) {
+                log.warn("Print Routing: '{}' oshxonasi uchun printer topilmadi! Bekor cheki chop etilmadi.",
+                        kitchen.getName());
+                continue;
+            }
+
+            printBatchKitchenCancellationSafely(printer, order, kitchen, kitchenItems, reason, cancelledByName, receiptNumber);
+        }
+    }
+
+    private Printer resolveKitchenPrinter(UUID tenantId, Kitchen kitchen) {
+        if (kitchen == null) return null;
+
+        // 1. Primary assigned printer for this kitchen
+        Optional<PrinterAssignment> assignment = assignmentRepository
+                .findByTenantIdAndKitchenIdAndPrimaryTrueAndActiveTrueAndDeletedAtIsNull(tenantId, kitchen.getId());
+        if (assignment.isPresent() && assignment.get().getPrinter().isActive()) {
+            return assignment.get().getPrinter();
+        }
+
+        // 2. Any active assignment for this kitchen
+        List<PrinterAssignment> anyAssignments = assignmentRepository
+                .findByTenantIdAndKitchenIdAndActiveTrueAndDeletedAtIsNull(tenantId, kitchen.getId());
+        for (PrinterAssignment pa : anyAssignments) {
+            if (pa.getPrinter().isActive()) return pa.getPrinter();
+        }
+
+        // 3. Any active printer with purpose KITCHEN
+        List<Printer> kitchenPrinters = printerRepository
+                .findByTenantIdAndPurposeAndDeletedAtIsNull(tenantId, Printer.PrinterPurpose.KITCHEN);
+        for (Printer kp : kitchenPrinters) {
+            if (kp.isActive()) return kp;
+        }
+
+        // 4. Default printer in system (if exists)
+        Optional<Printer> defaultPrinter = printerRepository
+                .findByTenantIdAndIsDefaultTrueAndDeletedAtIsNull(tenantId);
+        if (defaultPrinter.isPresent() && defaultPrinter.get().isActive()) {
+            return defaultPrinter.get();
+        }
+
+        // 5. Any active printer in tenant
+        List<Printer> any = printerRepository.findByTenantIdAndDeletedAtIsNullOrderByCreatedAtAsc(tenantId);
+        for (Printer p : any) {
+            if (p.isActive()) return p;
+        }
+
+        return null;
+    }
+
+    /**
+     * Dispatches receipt print job to the primary cashier printer.
+     * Guaranteed duplicate prevention & safe non-blocking execution.
+     */
+    @Transactional
+    public Order routeAndPrintReceipt(Order order, Payment payment) {
+        UUID tenantId = order.getTenant().getId();
+        UUID orderId = order.getId();
+        UUID paymentId = payment != null ? payment.getId() : null;
+
+        // 1. DUPLICATE CHECK: If order is already PRINTED, skip duplicate print
+        if (order.getReceiptPrintStatus() == Order.ReceiptPrintStatus.PRINTED) {
+            log.info("Duplicate receipt print prevented for order '{}' ({}) - already PRINTED.",
+                    order.getOrderNumber(), orderId);
+            return order;
+        }
+
+        order.setReceiptPrintStatus(Order.ReceiptPrintStatus.PRINTING);
+        order.setReceiptPrintAttempts(order.getReceiptPrintAttempts() + 1);
+        order = orderRepository.save(order);
+
+        // 2. Setting check
         boolean autoPrintSetting = appSettingRepository.findByTenantIdAndCategoryAndKey(tenantId, "PAYMENTS", "autoPrintReceiptAfterPayment")
                 .map(s -> Boolean.parseBoolean(s.getValue()))
                 .orElse(true);
 
         if (!autoPrintSetting) {
-            log.info("Receipt auto-print after payment is disabled in settings.");
-            return;
+            log.info("Receipt auto-print after payment is disabled in settings for order '{}'", order.getOrderNumber());
+            order.setReceiptPrintStatus(Order.ReceiptPrintStatus.NOT_PRINTED);
+            return orderRepository.save(order);
         }
 
-        // 2. Find Cashier printer
+        // 3. Find Cashier Printer
         Printer cashierPrinter = findCashierPrinter(tenantId);
         if (cashierPrinter == null) {
-            log.warn("Print Routing: Kassa printeri topilmadi. To'lov muvaffaqiyatli yakunlandi.");
-            return;
+            log.error("[PRINT_FAILED] Receipt print failed for orderId: {}, paymentId: {}, error: Kassa chek printeri topilmadi yoki sozlanmagan",
+                    orderId, paymentId);
+            order.setReceiptPrintStatus(Order.ReceiptPrintStatus.PRINT_FAILED);
+            order.setReceiptPrintError("Kassa chek printeri topilmadi yoki sozlanmagan");
+            return orderRepository.save(order);
         }
 
-        printReceiptSafely(cashierPrinter, order, payment, false);
+        return printReceiptSafely(cashierPrinter, order, payment, false);
     }
 
+    /**
+     * Reprints a kitchen ticket without creating new orders or tickets.
+     */
     @Transactional
     public void reprintKitchenTicket(UUID tenantId, UUID ticketId) {
         KitchenTicket ticket = kitchenTicketRepository.findById(ticketId)
@@ -130,6 +243,45 @@ public class PrintRoutingService {
         printKitchenTicketSafely(printer, order, kitchen, items, true);
     }
 
+    /**
+     * Reprints all kitchen tickets for an order without creating new orders or tickets.
+     */
+    @Transactional
+    public void reprintAllKitchenTicketsForOrder(UUID tenantId, UUID orderId) {
+        Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
+
+        List<OrderItem> items = order.getItems().stream()
+                .filter(i -> !i.isVoided() && i.getKitchen() != null)
+                .collect(Collectors.toList());
+
+        if (items.isEmpty()) {
+            throw PosException.badRequest("Buyurtmada oshxona taomlari yo'q");
+        }
+
+        Map<Kitchen, List<OrderItem>> byKitchen = items.stream()
+                .collect(Collectors.groupingBy(OrderItem::getKitchen));
+
+        for (Map.Entry<Kitchen, List<OrderItem>> entry : byKitchen.entrySet()) {
+            Kitchen kitchen = entry.getKey();
+            List<OrderItem> kitchenItems = entry.getValue();
+
+            Optional<PrinterAssignment> assignment = assignmentRepository
+                    .findByTenantIdAndKitchenIdAndPrimaryTrueAndActiveTrueAndDeletedAtIsNull(tenantId, kitchen.getId());
+
+            if (assignment.isEmpty()) {
+                log.warn("Reprint: '{}' oshxonasiga printer biriktirilmagan", kitchen.getName());
+                continue;
+            }
+
+            Printer printer = assignment.get().getPrinter();
+            printKitchenTicketSafely(printer, order, kitchen, kitchenItems, true);
+        }
+    }
+
+    /**
+     * Reprints an order receipt without creating new payments or billing.
+     */
     @Transactional
     public void reprintOrderReceipt(UUID tenantId, UUID orderId) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
@@ -140,60 +292,80 @@ public class PrintRoutingService {
 
         Printer cashierPrinter = findCashierPrinter(tenantId);
         if (cashierPrinter == null) {
-            throw PosException.badRequest("Kassa chek printeri topilmadi");
+            log.error("[REPRINT_FAILED] Kassa chek printeri topilmadi for orderId: {}, paymentId: {}",
+                    orderId, payment != null ? payment.getId() : "NONE");
+            order.setReceiptPrintStatus(Order.ReceiptPrintStatus.PRINT_FAILED);
+            order.setReceiptPrintError("Kassa chek printeri topilmadi yoki sozlanmagan");
+            orderRepository.save(order);
+            throw PosException.badRequest("Kassa chek printeri topilmadi yoki sozlanmagan");
         }
 
+        order.setReceiptPrintAttempts(order.getReceiptPrintAttempts() + 1);
         printReceiptSafely(cashierPrinter, order, payment, true);
     }
 
-    private Printer findCashierPrinter(UUID tenantId) {
-        // Look up in assignments first
-        Optional<PrinterAssignment> cashierAssignment = assignmentRepository
-                .findByTenantIdAndPurposeAndPrimaryTrueAndActiveTrueAndDeletedAtIsNull(tenantId, "CASHIER")
-                .stream().findFirst();
+    public Printer findCashierPrinter(UUID tenantId) {
+        // 1. Look up in assignments first for purpose CASHIER or RECEIPT
+        List<PrinterAssignment> assignments = assignmentRepository
+                .findByTenantIdAndActiveTrueAndDeletedAtIsNull(tenantId);
 
-        if (cashierAssignment.isPresent() && cashierAssignment.get().getPrinter().isActive()) {
+        Optional<PrinterAssignment> cashierAssignment = assignments.stream()
+                .filter(a -> "CASHIER".equalsIgnoreCase(a.getPurpose())
+                        && a.isPrimary() && a.getPrinter().isActive())
+                .findFirst();
+
+        if (cashierAssignment.isPresent()) {
             return cashierAssignment.get().getPrinter();
         }
 
-        // Otherwise default printer
-        return printerRepository.findByTenantIdAndIsDefaultTrueAndDeletedAtIsNull(tenantId)
-                .orElseGet(() -> {
-                    List<Printer> cashierPrinters = printerRepository.findByTenantIdAndPurposeAndDeletedAtIsNull(
-                            tenantId, Printer.PrinterPurpose.CASHIER);
-                    return cashierPrinters.isEmpty() ? null : cashierPrinters.get(0);
-                });
+        // 2. Default printer
+        Optional<Printer> defaultPrinter = printerRepository.findByTenantIdAndIsDefaultTrueAndDeletedAtIsNull(tenantId);
+        if (defaultPrinter.isPresent() && defaultPrinter.get().isActive()) {
+            return defaultPrinter.get();
+        }
+
+        // 3. Printer with purpose CASHIER directly
+        List<Printer> cashierPrinters = printerRepository.findByTenantIdAndPurposeAndDeletedAtIsNull(
+                tenantId, Printer.PrinterPurpose.CASHIER);
+        for (Printer p : cashierPrinters) {
+            if (p.isActive()) return p;
+        }
+
+        // 4. Fallback to any active configured printer
+        List<Printer> anyPrinters = printerRepository.findByTenantIdAndDeletedAtIsNullOrderByCreatedAtAsc(tenantId);
+        for (Printer p : anyPrinters) {
+            if (p.isActive()) return p;
+        }
+        return null;
     }
 
     private void printKitchenTicketSafely(Printer targetPrinter, Order order, Kitchen kitchen,
                                           List<OrderItem> items, boolean isReprint) {
         try {
-            byte[] ticketBytes = buildKitchenTicketBytes(order, kitchen, items, isReprint, targetPrinter.getPaperWidth());
-            sendToPrinterDevice(targetPrinter, ticketBytes);
+            kitchenPrintService.printKitchenTicket(targetPrinter, order, kitchen, items, isReprint);
             targetPrinter.setStatus(Printer.PrinterStatus.ONLINE);
             targetPrinter.setLastSuccessfulPrintAt(Instant.now());
             targetPrinter.setLastError(null);
             printerRepository.save(targetPrinter);
-            log.info("Kitchen ticket successfully printed to {} for {}", targetPrinter.getName(), kitchen.getName());
+            log.info("Kitchen ticket successfully printed to '{}' for '{}'", targetPrinter.getName(), kitchen.getName());
         } catch (Exception ex) {
-            log.warn("Print error on primary printer {}: {}", targetPrinter.getName(), ex.getMessage());
+            log.warn("Print error on kitchen primary printer '{}': {}", targetPrinter.getName(), ex.getMessage());
             targetPrinter.setStatus(Printer.PrinterStatus.OFFLINE);
             targetPrinter.setLastError("Chop etishda xatolik: " + ex.getMessage());
             printerRepository.save(targetPrinter);
 
-            // Fallback Printer
+            // Fallback Printer if configured
             if (targetPrinter.getFallbackPrinter() != null && targetPrinter.getFallbackPrinter().isActive()) {
                 Printer fallback = targetPrinter.getFallbackPrinter();
-                log.info("Attempting fallback printer {} for kitchen {}", fallback.getName(), kitchen.getName());
+                log.info("Attempting fallback printer '{}' for kitchen '{}'", fallback.getName(), kitchen.getName());
                 try {
-                    byte[] ticketBytes = buildKitchenTicketBytes(order, kitchen, items, isReprint, fallback.getPaperWidth());
-                    sendToPrinterDevice(fallback, ticketBytes);
+                    kitchenPrintService.printKitchenTicket(fallback, order, kitchen, items, isReprint);
                     fallback.setStatus(Printer.PrinterStatus.ONLINE);
                     fallback.setLastSuccessfulPrintAt(Instant.now());
                     printerRepository.save(fallback);
-                    log.info("Fallback print SUCCESS: {}", fallback.getName());
+                    log.info("Fallback print SUCCESS: '{}'", fallback.getName());
                 } catch (Exception fex) {
-                    log.error("Fallback printer {} also failed: {}", fallback.getName(), fex.getMessage());
+                    log.error("Fallback printer '{}' also failed: {}", fallback.getName(), fex.getMessage());
                     fallback.setStatus(Printer.PrinterStatus.OFFLINE);
                     fallback.setLastError("Fallback chop etishda xatolik: " + fex.getMessage());
                     printerRepository.save(fallback);
@@ -202,166 +374,132 @@ public class PrintRoutingService {
         }
     }
 
-    private void printReceiptSafely(Printer cashierPrinter, Order order, Payment payment, boolean isReprint) {
+    private void printKitchenCancellationSafely(Printer targetPrinter, Order order, Kitchen kitchen,
+                                                String productName, java.math.BigDecimal quantity, String reason,
+                                                String cancelledByName, String receiptNumber) {
         try {
-            byte[] receiptBytes = buildReceiptBytes(order, payment, isReprint, cashierPrinter.getPaperWidth());
-            sendToPrinterDevice(cashierPrinter, receiptBytes);
+            kitchenPrintService.printKitchenCancellationTicket(targetPrinter, order, kitchen,
+                    productName, quantity, reason, cancelledByName, receiptNumber);
+            targetPrinter.setStatus(Printer.PrinterStatus.ONLINE);
+            targetPrinter.setLastSuccessfulPrintAt(Instant.now());
+            targetPrinter.setLastError(null);
+            printerRepository.save(targetPrinter);
+            log.info("Kitchen cancellation ticket successfully printed to '{}' for '{}'",
+                    targetPrinter.getName(), kitchen.getName());
+        } catch (Exception ex) {
+            log.warn("Print error on kitchen cancellation printer '{}': {}", targetPrinter.getName(), ex.getMessage());
+            targetPrinter.setStatus(Printer.PrinterStatus.OFFLINE);
+            targetPrinter.setLastError("Bekor cheki chop etishda xatolik: " + ex.getMessage());
+            printerRepository.save(targetPrinter);
+
+            if (targetPrinter.getFallbackPrinter() != null && targetPrinter.getFallbackPrinter().isActive()) {
+                Printer fallback = targetPrinter.getFallbackPrinter();
+                try {
+                    kitchenPrintService.printKitchenCancellationTicket(fallback, order, kitchen,
+                            productName, quantity, reason, cancelledByName, receiptNumber);
+                    fallback.setStatus(Printer.PrinterStatus.ONLINE);
+                    fallback.setLastSuccessfulPrintAt(Instant.now());
+                    printerRepository.save(fallback);
+                    log.info("Fallback cancellation print SUCCESS: '{}'", fallback.getName());
+                } catch (Exception fex) {
+                    log.error("Fallback printer '{}' also failed: {}", fallback.getName(), fex.getMessage());
+                    fallback.setStatus(Printer.PrinterStatus.OFFLINE);
+                    fallback.setLastError("Fallback bekor cheki chop etishda xatolik: " + fex.getMessage());
+                    printerRepository.save(fallback);
+                }
+            }
+        }
+    }
+
+    private void printBatchKitchenCancellationSafely(Printer targetPrinter, Order order, Kitchen kitchen,
+                                                     List<OrderItem> items, String reason,
+                                                     String cancelledByName, String receiptNumber) {
+        try {
+            kitchenPrintService.printKitchenCancellationTickets(targetPrinter, order, kitchen,
+                    items, reason, cancelledByName, receiptNumber);
+            targetPrinter.setStatus(Printer.PrinterStatus.ONLINE);
+            targetPrinter.setLastSuccessfulPrintAt(Instant.now());
+            targetPrinter.setLastError(null);
+            printerRepository.save(targetPrinter);
+            log.info("Batch kitchen cancellation ticket successfully printed to '{}' for '{}'",
+                    targetPrinter.getName(), kitchen.getName());
+        } catch (Exception ex) {
+            log.warn("Print error on batch kitchen cancellation printer '{}': {}", targetPrinter.getName(), ex.getMessage());
+            targetPrinter.setStatus(Printer.PrinterStatus.OFFLINE);
+            targetPrinter.setLastError("Bekor cheki chop etishda xatolik: " + ex.getMessage());
+            printerRepository.save(targetPrinter);
+
+            if (targetPrinter.getFallbackPrinter() != null && targetPrinter.getFallbackPrinter().isActive()) {
+                Printer fallback = targetPrinter.getFallbackPrinter();
+                try {
+                    kitchenPrintService.printKitchenCancellationTickets(fallback, order, kitchen,
+                            items, reason, cancelledByName, receiptNumber);
+                    fallback.setStatus(Printer.PrinterStatus.ONLINE);
+                    fallback.setLastSuccessfulPrintAt(Instant.now());
+                    printerRepository.save(fallback);
+                    log.info("Fallback batch cancellation print SUCCESS: '{}'", fallback.getName());
+                } catch (Exception fex) {
+                    log.error("Fallback printer '{}' also failed: {}", fallback.getName(), fex.getMessage());
+                    fallback.setStatus(Printer.PrinterStatus.OFFLINE);
+                    fallback.setLastError("Fallback bekor cheki chop etishda xatolik: " + fex.getMessage());
+                    printerRepository.save(fallback);
+                }
+            }
+        }
+    }
+
+    private Order printReceiptSafely(Printer cashierPrinter, Order order, Payment payment, boolean isReprint) {
+        UUID orderId = order.getId();
+        UUID paymentId = payment != null ? payment.getId() : null;
+        String printerName = cashierPrinter != null ? cashierPrinter.getName() : "UNKNOWN";
+
+        if (isReprint) {
+            log.info("[REPRINT_STARTED] Receipt reprint started for orderId: {}, paymentId: {}, printer: '{}'",
+                    orderId, paymentId, printerName);
+        } else {
+            log.info("[PRINT_STARTED] Receipt print started for orderId: {}, paymentId: {}, printer: '{}'",
+                    orderId, paymentId, printerName);
+        }
+
+        try {
+            receiptPrintService.printReceipt(cashierPrinter, order, payment, isReprint);
             cashierPrinter.setStatus(Printer.PrinterStatus.ONLINE);
             cashierPrinter.setLastSuccessfulPrintAt(Instant.now());
             cashierPrinter.setLastError(null);
             printerRepository.save(cashierPrinter);
-            log.info("Receipt successfully printed to {}", cashierPrinter.getName());
+
+            order.setReceiptPrintStatus(Order.ReceiptPrintStatus.PRINTED);
+            order.setReceiptPrintedAt(Instant.now());
+            order.setReceiptPrintError(null);
+            order = orderRepository.save(order);
+
+            if (isReprint) {
+                log.info("[REPRINT_SUCCESS] Receipt reprint successful for orderId: {}, paymentId: {}, printer: '{}'",
+                        orderId, paymentId, printerName);
+            } else {
+                log.info("[PRINT_SUCCESS] Receipt printed successfully for orderId: {}, paymentId: {}, printer: '{}'",
+                        orderId, paymentId, printerName);
+            }
+            return order;
         } catch (Exception ex) {
-            log.warn("Receipt print error on printer {}: {}", cashierPrinter.getName(), ex.getMessage());
+            String errorMsg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
             cashierPrinter.setStatus(Printer.PrinterStatus.OFFLINE);
-            cashierPrinter.setLastError("Kassa cheki chiqarishda xatolik: " + ex.getMessage());
+            cashierPrinter.setLastError("Kassa cheki chiqarishda xatolik: " + errorMsg);
             printerRepository.save(cashierPrinter);
-        }
-    }
 
-    private void sendToPrinterDevice(Printer printer, byte[] data) throws Exception {
-        Printer.ConnectionType type = printer.getConnectionType();
+            order.setReceiptPrintStatus(Order.ReceiptPrintStatus.PRINT_FAILED);
+            order.setReceiptPrintError(errorMsg);
+            order = orderRepository.save(order);
 
-        if (type == Printer.ConnectionType.NETWORK || type == Printer.ConnectionType.TCPIP) {
-            String ip = printer.getIpAddress();
-            int port = printer.getPort() != null ? printer.getPort() : 9100;
-
-            if (ip == null || ip.isBlank()) {
-                throw new IllegalStateException("IP manzil ko'rsatilmagan");
+            if (isReprint) {
+                log.error("[REPRINT_FAILED] Receipt reprint failed for orderId: {}, paymentId: {}, printer: '{}', error: {}",
+                        orderId, paymentId, printerName, errorMsg);
+                throw PosException.badRequest("Chekni qayta chop etishda xatolik: " + errorMsg);
+            } else {
+                log.error("[PRINT_FAILED] Receipt print failed for orderId: {}, paymentId: {}, printer: '{}', error: {}",
+                        orderId, paymentId, printerName, errorMsg);
             }
-
-            try (Socket socket = new Socket()) {
-                socket.connect(new InetSocketAddress(ip, port), 2500);
-                try (OutputStream out = socket.getOutputStream()) {
-                    out.write(data);
-                    out.flush();
-                }
-            }
-        } else {
-            // WINDOWS or USB: simulate or use Spooler if attached
-            log.info("Simulated/Windows raw print job of {} bytes dispatched to {}", data.length, printer.getName());
+            return order;
         }
-    }
-
-    private byte[] buildKitchenTicketBytes(Order order, Kitchen kitchen, List<OrderItem> items,
-                                           boolean isReprint, int paperWidth) {
-        String timeStr = DateTimeFormatter.ofPattern("HH:mm:ss")
-                .withZone(ZoneId.of("Asia/Tashkent"))
-                .format(Instant.now());
-
-        String tableName = order.getTable() != null ? order.getTable().getName() : "Olib ketish";
-        String waiterName = order.getWaiter() != null ? order.getWaiter().getFullName() : "Kassir";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n================================\n");
-        if (isReprint) {
-            sb.append(" *** QAYTA CHOP ETILDI *** \n");
-            sb.append("================================\n");
-        }
-        sb.append("       ").append(kitchen.getName().toUpperCase()).append("\n");
-        sb.append("================================\n");
-        sb.append("BUYURTMA: ").append(order.getOrderNumber()).append("\n");
-        sb.append("STOL:     ").append(tableName).append("\n");
-        sb.append("XODIM:    ").append(waiterName).append("\n");
-        sb.append("VAQT:     ").append(timeStr).append("\n");
-        sb.append("--------------------------------\n");
-
-        for (OrderItem item : items) {
-            sb.append(String.format("%-22s x%2.0f\n", truncate(item.getProductName(), 22), item.getQuantity()));
-            if (item.getNotes() != null && !item.getNotes().isBlank()) {
-                sb.append("  * ").append(item.getNotes()).append("\n");
-            }
-        }
-
-        sb.append("--------------------------------\n");
-        if (order.getNotes() != null && !order.getNotes().isBlank()) {
-            sb.append("Izoh: ").append(order.getNotes()).append("\n");
-        }
-        sb.append("\n\n\n\n");
-
-        byte[] textBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
-        byte[] escInit = new byte[]{0x1B, 0x40}; // ESC @
-        byte[] cut = new byte[]{0x1D, 0x56, 0x41, 0x10}; // GS V A 16 (cut)
-
-        byte[] result = new byte[escInit.length + textBytes.length + cut.length];
-        System.arraycopy(escInit, 0, result, 0, escInit.length);
-        System.arraycopy(textBytes, 0, result, escInit.length, textBytes.length);
-        System.arraycopy(cut, 0, result, escInit.length + textBytes.length, cut.length);
-        return result;
-    }
-
-    private byte[] buildReceiptBytes(Order order, Payment payment, boolean isReprint, int paperWidth) {
-        String timeStr = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                .withZone(ZoneId.of("Asia/Tashkent"))
-                .format(Instant.now());
-
-        String tableName = order.getTable() != null ? order.getTable().getName() : "Olib ketish";
-        String cashierName = payment != null && payment.getCashier() != null ? payment.getCashier().getFullName() : "Kassir";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n================================\n");
-        sb.append("   OYBEK RESTAURANT & LOUNGE    \n");
-        sb.append("   Qarshi sh., Mustaqillik shox \n");
-        sb.append("   Tel: +998 90 123 45 67       \n");
-        sb.append("================================\n");
-        if (isReprint) {
-            sb.append(" *** NUSXA / REPRINT CHEK ***  \n");
-            sb.append("================================\n");
-        }
-        sb.append("CHEK:     ").append(payment != null ? payment.getPaymentNumber() : order.getOrderNumber()).append("\n");
-        sb.append("STOL:     ").append(tableName).append("\n");
-        sb.append("KASSIR:   ").append(cashierName).append("\n");
-        sb.append("SANA:     ").append(timeStr).append("\n");
-        sb.append("--------------------------------\n");
-        sb.append("MAHSULOT          MIQDOR   SUMMA\n");
-        sb.append("--------------------------------\n");
-
-        if (order.getItems() != null) {
-            for (OrderItem item : order.getItems()) {
-                if (item.isVoided()) continue;
-                String line = String.format("%-16s %2.0f x %7.0f\n",
-                        truncate(item.getProductName(), 16),
-                        item.getQuantity(),
-                        item.getSubtotal());
-                sb.append(line);
-            }
-        }
-
-        sb.append("--------------------------------\n");
-        sb.append(String.format("ORALIQ JAMI:      %12.0f\n", order.getSubtotal()));
-        if (order.getDiscountAmount() != null && order.getDiscountAmount().compareTo(BigDecimal.ZERO) > 0) {
-            sb.append(String.format("CHEGIRMA:        -%12.0f\n", order.getDiscountAmount()));
-        }
-        if (order.getTaxAmount() != null && order.getTaxAmount().compareTo(BigDecimal.ZERO) > 0) {
-            sb.append(String.format("SOLIQ (QQS):     +%12.0f\n", order.getTaxAmount()));
-        }
-        sb.append("================================\n");
-        sb.append(String.format("TO'LANISHI KERAK: %12.0f so'm\n", order.getTotal()));
-        if (payment != null) {
-            sb.append(String.format("TO'LOV USULI:     %12s\n", payment.getPaymentMethod()));
-            sb.append(String.format("TO'LANDI:         %12.0f so'm\n", payment.getAmount()));
-            if (payment.getChangeAmount() != null && payment.getChangeAmount().compareTo(BigDecimal.ZERO) > 0) {
-                sb.append(String.format("QAYTIM:           %12.0f so'm\n", payment.getChangeAmount()));
-            }
-        }
-        sb.append("================================\n");
-        sb.append("    XARIDINGIZ UCHUN RAHMAT!    \n");
-        sb.append("      YANA KUTIB QOLAMIZ!       \n");
-        sb.append("\n\n\n\n");
-
-        byte[] textBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
-        byte[] escInit = new byte[]{0x1B, 0x40};
-        byte[] cut = new byte[]{0x1D, 0x56, 0x41, 0x10};
-
-        byte[] result = new byte[escInit.length + textBytes.length + cut.length];
-        System.arraycopy(escInit, 0, result, 0, escInit.length);
-        System.arraycopy(textBytes, 0, result, escInit.length, textBytes.length);
-        System.arraycopy(cut, 0, result, escInit.length + textBytes.length, cut.length);
-        return result;
-    }
-
-    private String truncate(String text, int max) {
-        if (text == null) return "";
-        return text.length() <= max ? text : text.substring(0, max);
     }
 }

@@ -18,8 +18,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -186,6 +188,46 @@ public class KitchenService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<OrderDto.Response> getActiveKitchenOrdersForKitchens(UUID tenantId, Set<UUID> kitchenIds) {
+        if (kitchenIds == null || kitchenIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Order.OrderStatus> kitchenStatuses = List.of(
+                Order.OrderStatus.OPEN,
+                Order.OrderStatus.IN_PROGRESS
+        );
+
+        List<Order> orders = orderRepository.findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, kitchenStatuses);
+
+        return orders.stream()
+                .map(order -> filterOrderForKitchens(order, kitchenIds))
+                .filter(res -> res != null && res.getItems() != null && !res.getItems().isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    private OrderDto.Response filterOrderForKitchens(Order order, Set<UUID> kitchenIds) {
+        OrderDto.Response full = orderService.toResponse(order);
+        List<OrderDto.ItemResponse> filteredItems = full.getItems().stream()
+                .filter(i -> i.getKitchenId() != null && kitchenIds.contains(i.getKitchenId()))
+                .collect(Collectors.toList());
+
+        if (filteredItems.isEmpty()) {
+            return null;
+        }
+
+        full.setItems(filteredItems);
+        // Financial Data Isolation: Kitchen user must NOT see full order financials!
+        full.setSubtotal(null);
+        full.setDiscountAmount(null);
+        full.setDiscountPercent(null);
+        full.setTaxAmount(null);
+        full.setTotal(null);
+        full.setPaidAmount(null);
+        full.setChangeAmount(null);
+        return full;
+    }
+
     private OrderDto.Response filterOrderForKitchen(Order order, UUID kitchenId) {
         OrderDto.Response full = orderService.toResponse(order);
         List<OrderDto.ItemResponse> filteredItems = full.getItems().stream()
@@ -224,6 +266,21 @@ public class KitchenService {
     }
 
     @Transactional(readOnly = true)
+    public OrderDto.Response getKitchenOrderByIdForKitchens(UUID orderId, UUID tenantId, Set<UUID> userKitchenIds) {
+        Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
+
+        if (userKitchenIds != null && !userKitchenIds.isEmpty()) {
+            OrderDto.Response filtered = filterOrderForKitchens(order, userKitchenIds);
+            if (filtered == null) {
+                throw PosException.forbidden("Sizda boshqa oshxona ma'lumotlarini ko'rish huquqi yo'q!");
+            }
+            return filtered;
+        }
+        return orderService.toResponse(order);
+    }
+
+    @Transactional(readOnly = true)
     public com.restaurantpos.kitchen.entity.KitchenTicket getKitchenTicketById(UUID ticketId, UUID tenantId, UUID userKitchenId) {
         com.restaurantpos.kitchen.entity.KitchenTicket ticket = kitchenTicketRepository.findByIdAndTenantId(ticketId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Kitchen ticket topilmadi: " + ticketId));
@@ -236,12 +293,17 @@ public class KitchenService {
 
     @Transactional
     public void updateKitchenOrderStatus(UUID orderId, UUID tenantId, String statusStr, UUID userKitchenId) {
+        updateKitchenOrderStatusForKitchens(orderId, tenantId, statusStr, userKitchenId != null ? Set.of(userKitchenId) : null);
+    }
+
+    @Transactional
+    public void updateKitchenOrderStatusForKitchens(UUID orderId, UUID tenantId, String statusStr, Set<UUID> kitchenIds) {
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Buyurtma topilmadi: " + orderId));
 
-        if (userKitchenId != null) {
+        if (kitchenIds != null && !kitchenIds.isEmpty()) {
             boolean hasItemsForKitchen = order.getItems().stream()
-                    .anyMatch(i -> i.getKitchen() != null && userKitchenId.equals(i.getKitchen().getId()));
+                    .anyMatch(i -> i.getKitchen() != null && kitchenIds.contains(i.getKitchen().getId()));
             if (!hasItemsForKitchen) {
                 throw PosException.forbidden("Sizda boshqa oshxona ma'lumotlarini o'zgartirish huquqi yo'q!");
             }
@@ -249,7 +311,7 @@ public class KitchenService {
 
         OrderItem.KitchenStatus status = OrderItem.KitchenStatus.valueOf(statusStr.toUpperCase());
         for (OrderItem item : order.getItems()) {
-            if (userKitchenId == null || (item.getKitchen() != null && userKitchenId.equals(item.getKitchen().getId()))) {
+            if (kitchenIds == null || (item.getKitchen() != null && kitchenIds.contains(item.getKitchen().getId()))) {
                 item.setKitchenStatus(status);
                 if (status == OrderItem.KitchenStatus.READY) {
                     item.setReadyAt(Instant.now());
@@ -261,7 +323,6 @@ public class KitchenService {
         orderRepository.save(order);
     }
 
-
     @Transactional
     public void updateItemKitchenStatus(UUID itemId, String statusStr) {
         updateItemKitchenStatus(itemId, statusStr, null);
@@ -269,10 +330,15 @@ public class KitchenService {
 
     @Transactional
     public void updateItemKitchenStatus(UUID itemId, String statusStr, UUID userKitchenId) {
+        updateItemKitchenStatusForKitchens(itemId, statusStr, userKitchenId != null ? Set.of(userKitchenId) : null);
+    }
+
+    @Transactional
+    public void updateItemKitchenStatusForKitchens(UUID itemId, String statusStr, Set<UUID> kitchenIds) {
         OrderItem item = orderItemRepository.findById(itemId)
                 .orElseThrow(() -> PosException.notFound("Order item not found: " + itemId));
 
-        if (userKitchenId != null && item.getKitchen() != null && !userKitchenId.equals(item.getKitchen().getId())) {
+        if (kitchenIds != null && !kitchenIds.isEmpty() && item.getKitchen() != null && !kitchenIds.contains(item.getKitchen().getId())) {
             throw PosException.forbidden("Sizda boshqa oshxona mahsuloti statusini o'zgartirish huquqi yo'q!");
         }
 

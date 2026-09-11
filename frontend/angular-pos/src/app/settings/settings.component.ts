@@ -2,7 +2,7 @@ import { Component, OnInit, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SettingsService, AllSettingsResponse, RestaurantSettings, GeneralSettings, ReceiptSettings, PaymentSettings, TaxServiceSettings, OrderSettings, KitchenSettings, NotificationSettings, SecuritySettings, BackupSettings, SystemInfoDto, AuditLogEntry } from '../core/services/settings.service';
-import { PrinterService, Printer, CreatePrinterRequest, UpdatePrinterRequest, TestPrintResult, ExtendedKitchenStation } from '../core/services/printer.service';
+import { PrinterService, Printer, CreatePrinterRequest, UpdatePrinterRequest, TestPrintResult, ExtendedKitchenStation, AvailablePrinter } from '../core/services/printer.service';
 import { AuthService } from '../core/services/auth.service';
 
 type SettingsCategory = 
@@ -314,11 +314,10 @@ type SettingsCategory =
                   <div class="role-card cashier">
                     <div class="role-badge">CASHIER</div>
                     <h4>Kassir</h4>
-                    <p>Buyurtma to'lovlarini qabul qilish, kassa cheki chop etish va smena yopish.</p>
+                    <p>Buyurtma to'lovlarini qabul qilish va kassa cheki chop etish.</p>
                     <div class="permission-tags">
                       <span class="perm-tag">PROCESS_PAYMENT</span>
                       <span class="perm-tag">PRINT_RECEIPT</span>
-                      <span class="perm-tag">MANAGE_SHIFTS</span>
                     </div>
                   </div>
                   <div class="role-card waiter">
@@ -458,9 +457,18 @@ type SettingsCategory =
                 <div class="card-header-flex">
                   <div>
                     <h3>🖨️ Restoran Printer Management Tizimi</h3>
-                    <p>Oshxona va kassa chek printerlarini markaziy boshqarish, ulanish turlari va test sinovlari.</p>
+                    <p>Kompyuterdagi real Windows printerlari bilan to'g'ridan-to'g'ri integratsiya va oshxona routingi.</p>
                   </div>
-                  <button class="pos-btn pos-btn-primary" (click)="openAddPrinterModal()">+ Yangi Printer Qo'shish</button>
+                  <div class="action-btn-group">
+                    <button class="pos-btn pos-btn-secondary" (click)="refreshPrinters()" [disabled]="refreshingPrinters()">
+                      @if (refreshingPrinters()) {
+                        <span class="spinner"></span> Yangilanmoqda...
+                      } @else {
+                        ↻ Printerlarni yangilash
+                      }
+                    </button>
+                    <button class="pos-btn pos-btn-primary" (click)="openAddPrinterModal()">+ Printer qo'shish</button>
+                  </div>
                 </div>
 
                 <!-- STATS ROW -->
@@ -475,7 +483,7 @@ type SettingsCategory =
                   </div>
                   <div class="stat-box danger">
                     <span class="stat-val">{{ offlinePrintersCount() }}</span>
-                    <span class="stat-lbl">OFFLINE / Xato</span>
+                    <span class="stat-lbl">OFFLINE / NOT FOUND</span>
                   </div>
                   <div class="stat-box">
                     <span class="stat-val">{{ defaultCashierPrinterName() }}</span>
@@ -487,12 +495,16 @@ type SettingsCategory =
                 @if (testPrintResult()) {
                   <div class="test-feedback-box" [class.success]="testPrintResult()?.success" [class.error]="!testPrintResult()?.success">
                     <div class="feedback-header">
-                      <strong>{{ testPrintResult()?.success ? '✅ TEST CHOP ETISH MUVAFFAQIYATLI' : '❌ PRINTERGA ULANISH IMKONI BO\'LMADI' }}</strong>
+                      @if (testPrintResult()?.success) {
+                        <strong class="feedback-title success-title">✅ TEST CHOP ETISH MUVAFFAQIYATLI</strong>
+                      } @else {
+                        <strong class="feedback-title error-title">❌ PRINTERGA ULANISH IMKONI BO'LMADI</strong>
+                      }
                       <button class="toast-close" (click)="clearTestResult()">✕</button>
                     </div>
                     <div class="feedback-body">
-                      <div><strong>Printer:</strong> {{ testPrintResult()?.printerName }} ({{ testPrintResult()?.connectionType }})</div>
-                      <div><strong>Nishon / Manzil:</strong> {{ testPrintResult()?.target }}</div>
+                      <div><strong>Printer:</strong> {{ testPrintResult()?.printerName }}</div>
+                      <div><strong>Windows printeri:</strong> {{ testPrintResult()?.target }}</div>
                       <div><strong>Xabar:</strong> {{ testPrintResult()?.message }}</div>
                       @if (testPrintResult()?.errorDetails) {
                         <div class="error-cause"><strong>Xato sababi:</strong> {{ testPrintResult()?.errorDetails }}</div>
@@ -510,33 +522,21 @@ type SettingsCategory =
                           <div class="printer-name">
                             🖨️ {{ p.name }}
                             @if (p.isDefault) {
-                              <span class="default-badge">ASOSIY</span>
+                              <span class="default-badge">ASOSIY KASSA</span>
                             }
                           </div>
-                          <div class="printer-model">{{ p.model || 'Standart POS Printer' }}</div>
+                          <div class="printer-model">{{ p.model || 'Windows Print Device' }}</div>
                         </div>
-                        <span class="status-indicator" [class.online]="p.status === 'ONLINE'" [class.offline]="p.status !== 'ONLINE'">
+                        <span class="status-indicator" [class.online]="p.status === 'ONLINE'" [class.offline]="p.status === 'OFFLINE'" [class.notfound]="p.status === 'NOT_FOUND'" [class.unknown]="p.status === 'UNKNOWN'">
                           ● {{ p.status }}
                         </span>
                       </div>
 
                       <div class="printer-details">
                         <div class="detail-row">
-                          <span class="lbl">Ulanish turi:</span>
-                          <span class="val badge-conn">{{ p.connectionType }}</span>
+                          <span class="lbl">Windows printeri:</span>
+                          <span class="val font-semibold">{{ p.systemPrinterName || p.windowsPrinterName || 'Nomalum' }}</span>
                         </div>
-                        @if (p.connectionType === 'NETWORK' || p.connectionType === 'TCPIP') {
-                          <div class="detail-row">
-                            <span class="lbl">IP & Port:</span>
-                            <span class="val code-font">{{ p.ipAddress }}:{{ p.port || 9100 }}</span>
-                          </div>
-                        }
-                        @if (p.connectionType === 'WINDOWS') {
-                          <div class="detail-row">
-                            <span class="lbl">Windows printeri:</span>
-                            <span class="val">{{ p.windowsPrinterName || 'Standart Spooler' }}</span>
-                          </div>
-                        }
                         <div class="detail-row">
                           <span class="lbl">Maqsadi (Purpose):</span>
                           <span class="val purpose-tag" [class.kitchen]="p.purpose === 'KITCHEN'" [class.cashier]="p.purpose === 'CASHIER'">
@@ -545,12 +545,12 @@ type SettingsCategory =
                         </div>
                         @if (p.purpose === 'KITCHEN') {
                           <div class="detail-row">
-                            <span class="lbl">Bog'langan oshxona:</span>
+                            <span class="lbl">Oshxona bo'limi:</span>
                             <span class="val">
                               @if (p.assignedKitchenName) {
                                 <strong>{{ p.assignedKitchenName }}</strong>
                                 @if (p.isPrimaryForKitchen) {
-                                  <span class="primary-mini-pill">(Primary)</span>
+                                  <span class="primary-mini-pill">(PRIMARY)</span>
                                 }
                               } @else {
                                 <span class="muted-small">Biriktirilmagan</span>
@@ -559,12 +559,12 @@ type SettingsCategory =
                           </div>
                         }
                         <div class="detail-row">
-                          <span class="lbl">Qog'oz kengligi:</span>
+                          <span class="lbl">Qog'oz formati:</span>
                           <span class="val">{{ p.paperWidth }} mm</span>
                         </div>
                         <div class="detail-row">
                           <span class="lbl">Auto-Print:</span>
-                          <span class="val">{{ p.autoPrint ? 'Yoqilgan (ON)' : 'O\'chirilgan (OFF)' }}</span>
+                          <span class="val" [class.text-success]="p.autoPrint">{{ p.autoPrint ? 'Yoqilgan (ON)' : 'Ochirilgan (OFF)' }}</span>
                         </div>
                         @if (p.fallbackPrinterName) {
                           <div class="detail-row">
@@ -1097,119 +1097,139 @@ type SettingsCategory =
       </div>
 
       <!-- ADD / EDIT PRINTER MODAL -->
+      <!-- ADD / EDIT PRINTER MODAL -->
       @if (showPrinterModal()) {
         <div class="modal-backdrop">
           <div class="pos-modal printer-modal fade-in">
             <div class="modal-header">
-              <h3>{{ editingPrinter() ? 'Tahrirlash: ' + printerForm.name : 'Yangi Printer Qo\'shish' }}</h3>
+              <div>
+                <h3>{{ editingPrinter() ? 'Printerni Tahrirlash' : 'Kompyuterdagi mavjud printerlar' }}</h3>
+                <p class="modal-subtitle">
+                  {{ editingPrinter() ? 'POS printer parametrlarini sozlang' : 'Windows tizimidan aniqlangan printerni tanlang va konfiguratsiya qiling' }}
+                </p>
+              </div>
               <button class="modal-close" (click)="closePrinterModal()">✕</button>
             </div>
             <div class="modal-body">
-              <div class="form-grid">
-                <div class="form-group span-2">
-                  <label>Printer nomi *</label>
-                  <input type="text" class="pos-input" [(ngModel)]="printerForm.name" placeholder="Masalan: Printer-01 (Pitsaxona)">
-                </div>
-                <div class="form-group">
-                  <label>Modeli</label>
-                  <input type="text" class="pos-input" [(ngModel)]="printerForm.model" placeholder="EPSON TM-T20III, XPrinter...">
-                </div>
-                <div class="form-group">
-                  <label>Ulanish turi (Connection type) *</label>
-                  <select class="pos-select" [(ngModel)]="printerForm.connectionType">
-                    <option value="NETWORK">NETWORK (IP Tarmoq printeri)</option>
-                    <option value="TCPIP">TCP/IP</option>
-                    <option value="WINDOWS">WINDOWS (Spooler printer)</option>
-                    <option value="USB">USB (To'g'ridan-to'g'ri USB)</option>
-                  </select>
-                </div>
-
-                @if (printerForm.connectionType === 'NETWORK' || printerForm.connectionType === 'TCPIP') {
-                  <div class="form-group">
-                    <label>IP manzil *</label>
-                    <input type="text" class="pos-input" [(ngModel)]="printerForm.ipAddress" placeholder="192.168.1.105">
-                  </div>
-                  <div class="form-group">
-                    <label>Port</label>
-                    <input type="number" class="pos-input" [(ngModel)]="printerForm.port" placeholder="9100">
-                  </div>
-                }
-
-                @if (printerForm.connectionType === 'WINDOWS' || printerForm.connectionType === 'USB') {
-                  <div class="form-group span-2">
-                    <label>Windows printer nomi</label>
-                    <input type="text" class="pos-input" [(ngModel)]="printerForm.windowsPrinterName" placeholder="EPSON TM-T20III Receipt">
-                    <span class="muted-small">Windows 'Printers & Scanners' ro'yxatidagi aniq nomi</span>
-                  </div>
-                }
-
-                <div class="form-group">
-                  <label>Printer maqsadi (Purpose) *</label>
-                  <select class="pos-select" [(ngModel)]="printerForm.purpose">
-                    <option value="KITCHEN">KITCHEN (Oshxona buyurtmalari)</option>
-                    <option value="CASHIER">CASHIER (Kassa cheki)</option>
-                    <option value="BAR">BAR (Bar ichimliklari)</option>
-                    <option value="OTHER">OTHER (Boshqa)</option>
-                  </select>
-                </div>
-
-                @if (printerForm.purpose === 'KITCHEN') {
-                  <div class="form-group">
-                    <label>Biriktiriladigan Oshxona bo'limi *</label>
-                    <select class="pos-select" [(ngModel)]="printerForm.kitchenId">
-                      <option [ngValue]="null">-- Oshxonani tanlang --</option>
-                      @for (k of kitchens(); track k.id) {
-                        <option [ngValue]="k.id">{{ k.name }} ({{ k.code }})</option>
+              @if (!editingPrinter()) {
+                <!-- 1. WINDOWS DISCOVERED PRINTERS LIST -->
+                <div class="discovery-section">
+                  <div class="discovery-header">
+                    <span class="section-title">🔍 Windows tizimidagi o'rnatilgan printerlar:</span>
+                    <button class="pos-btn-sm" (click)="loadAvailableWindowsPrinters()" [disabled]="loadingAvailablePrinters()">
+                      @if (loadingAvailablePrinters()) {
+                        <span class="spinner"></span> Qidirilmoqda...
+                      } @else {
+                        ↻ Qayta qidirish
                       }
+                    </button>
+                  </div>
+
+                  @if (loadingAvailablePrinters()) {
+                    <div class="discovery-loader">
+                      <span class="spinner"></span> Windows tizimidagi printerlar skaner qilinmoqda...
+                    </div>
+                  } @else if (availableWindowsPrinters().length === 0) {
+                    <div class="empty-printers-alert">
+                      ⚠️ Ushbu kompyuterda Windows tomonidan o'rnatilgan printerlar topilmadi.
+                      Iltimos, Windows "Printers & Scanners" menyusi orqali printerni o'rnating.
+                    </div>
+                  } @else {
+                    <div class="windows-printers-list">
+                      @for (wp of availableWindowsPrinters(); track wp.systemPrinterName) {
+                        <div class="win-printer-card"
+                             [class.selected]="selectedWindowsPrinter()?.systemPrinterName === wp.systemPrinterName"
+                             (click)="selectWindowsPrinter(wp)">
+                          <div class="win-printer-left">
+                            <span class="radio-circle">{{ selectedWindowsPrinter()?.systemPrinterName === wp.systemPrinterName ? '●' : '○' }}</span>
+                            <div>
+                              <div class="win-printer-name">
+                                🖨️ {{ wp.systemPrinterName }}
+                                @if (wp.isDefault) {
+                                  <span class="default-badge">Windows Asosiy</span>
+                                }
+                              </div>
+                              <div class="win-printer-driver">Drayver: {{ wp.driverName || 'Standart' }}</div>
+                            </div>
+                          </div>
+                          <span class="status-indicator" [class.online]="wp.status === 'ONLINE'" [class.offline]="wp.status === 'OFFLINE'" [class.unknown]="wp.status === 'UNKNOWN'">
+                            ● {{ wp.status }}
+                          </span>
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- 2. POS CONFIGURATION FORM -->
+              @if (editingPrinter() || selectedWindowsPrinter()) {
+                <div class="config-divider"></div>
+                <div class="selected-printer-pill">
+                  <span>Tanlangan Windows printeri:</span>
+                  <strong>{{ editingPrinter() ? (editingPrinter()?.systemPrinterName || editingPrinter()?.windowsPrinterName) : selectedWindowsPrinter()?.systemPrinterName }}</strong>
+                </div>
+
+                <div class="form-grid">
+                  <div class="form-group span-2">
+                    <label>Printer nomi (POS uchun ko'rinadigan nom)</label>
+                    <input type="text" class="pos-input" [(ngModel)]="printerForm.name" placeholder="Masalan: EPSON TM-T20III">
+                  </div>
+
+                  <div class="form-group">
+                    <label>Printer maqsadi (Purpose) *</label>
+                    <select class="pos-select" [(ngModel)]="printerForm.purpose">
+                      <option value="KITCHEN">KITCHEN (Oshxona)</option>
+                      <option value="CASHIER">CASHIER (Kassa)</option>
                     </select>
                   </div>
-                }
 
-                <div class="form-group">
-                  <label>Qog'oz kengligi</label>
-                  <select class="pos-select" [(ngModel)]="printerForm.paperWidth">
-                    <option [ngValue]="80">80 mm (Standart)</option>
-                    <option [ngValue]="58">58 mm (Kichik)</option>
-                  </select>
-                </div>
+                  @if (printerForm.purpose === 'KITCHEN') {
+                    <div class="form-group">
+                      <label>Oshxona bo'limi *</label>
+                      <select class="pos-select" [(ngModel)]="printerForm.kitchenId">
+                        <option [ngValue]="null">-- Oshxonani tanlang --</option>
+                        @for (k of kitchens(); track k.id) {
+                          <option [ngValue]="k.id">{{ k.name }} ({{ k.code }})</option>
+                        }
+                      </select>
+                    </div>
+                  }
 
-                <div class="form-group">
-                  <label>Zaxira (Fallback) printer</label>
-                  <select class="pos-select" [(ngModel)]="printerForm.fallbackPrinterId">
-                    <option [ngValue]="null">-- Zaxira printer yo'q --</option>
-                    @for (p of printers(); track p.id) {
-                      @if (!editingPrinter() || p.id !== editingPrinter()?.id) {
-                        <option [ngValue]="p.id">{{ p.name }} ({{ p.connectionType }})</option>
+                  <div class="form-group">
+                    <label>Qog'oz formati *</label>
+                    <select class="pos-select" [(ngModel)]="printerForm.paperWidth">
+                      <option [ngValue]="80">80 mm (Standart)</option>
+                      <option [ngValue]="58">58 mm (Kichik)</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group span-2">
+                    <div class="toggle-list">
+                      <label class="toggle-item">
+                        <input type="checkbox" [(ngModel)]="printerForm.autoPrint">
+                        <span>Avtomatik chop etish (Auto Print)</span>
+                      </label>
+                      @if (printerForm.purpose === 'KITCHEN') {
+                        <label class="toggle-item">
+                          <input type="checkbox" [(ngModel)]="printerForm.isPrimary">
+                          <span>Ushbu oshxona uchun asosiy (PRIMARY) printer</span>
+                        </label>
                       }
-                    }
-                  </select>
-                </div>
-
-                <div class="form-group span-2">
-                  <div class="toggle-list">
-                    <label class="toggle-item">
-                      <input type="checkbox" [(ngModel)]="printerForm.autoPrint">
-                      <span>Avtomatik chop etish (Auto Print) yoqilgan</span>
-                    </label>
-                    @if (printerForm.purpose === 'KITCHEN') {
-                      <label class="toggle-item">
-                        <input type="checkbox" [(ngModel)]="printerForm.isPrimary">
-                        <span>Oshxona uchun asosiy (Primary) printer</span>
-                      </label>
-                    }
-                    @if (printerForm.purpose === 'CASHIER') {
-                      <label class="toggle-item">
-                        <input type="checkbox" [(ngModel)]="printerForm.isDefault">
-                        <span>Asosiy kassa printeri sifatida belgilash</span>
-                      </label>
-                    }
+                      @if (printerForm.purpose === 'CASHIER') {
+                        <label class="toggle-item">
+                          <input type="checkbox" [(ngModel)]="printerForm.isDefault">
+                          <span>Asosiy kassa printeri (PRIMARY)</span>
+                        </label>
+                      }
+                    </div>
                   </div>
                 </div>
-              </div>
+              }
             </div>
             <div class="modal-footer">
               <button class="pos-btn pos-btn-secondary" (click)="closePrinterModal()">Bekor qilish</button>
-              <button class="pos-btn pos-btn-primary" (click)="savePrinter()" [disabled]="savingPrinter()">
+              <button class="pos-btn pos-btn-primary" (click)="savePrinter()" [disabled]="savingPrinter() || (!editingPrinter() && !selectedWindowsPrinter())">
                 @if (savingPrinter()) {
                   <span class="spinner"></span> Saqlanmoqda...
                 } @else {
@@ -1230,11 +1250,13 @@ type SettingsCategory =
               <button class="modal-close" (click)="cancelDeletePrinter()">✕</button>
             </div>
             <div class="modal-body">
-              <p>Haqiqatan ham <strong>{{ deletingPrinter()?.name }}</strong> printerini o'chirmoqchimisiz?</p>
+              <p>Haqiqatan ham <strong>{{ deletingPrinter()?.name }}</strong> printerini POS tizimidan olib tashlamoqchimisiz?</p>
+              <div class="info-alert">
+                ℹ️ Bu amal faqat POS konfiguratsiyasidan printerni o'chiradi. Windows'dagi haqiqiy printer o'chirilmaydi.
+              </div>
               @if (deletingPrinter()?.assignedKitchenName) {
                 <div class="warning-alert">
-                  ⚠️ Bu printer hozir <strong>{{ deletingPrinter()?.assignedKitchenName }}</strong> bo'limiga biriktirilgan.
-                  O'chirilgach, ushbu oshxona uchun yangi printer biriktirishingiz kerak bo'ladi.
+                  ⚠️ Bu printer hozir <strong>{{ deletingPrinter()?.assignedKitchenName }}</strong> oshxonasiga biriktirilgan.
                 </div>
               }
             </div>
@@ -1639,6 +1661,126 @@ type SettingsCategory =
       border-radius: 100px;
       &.online { background: rgba(16, 185, 129, 0.15); color: var(--success); }
       &.offline { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+      &.notfound { background: rgba(249, 115, 22, 0.15); color: #fb923c; }
+      &.unknown { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
+    }
+    .action-btn-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .discovery-section {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+    .discovery-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      .section-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+    }
+    .discovery-loader {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .empty-printers-alert {
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: #fbbf24;
+    }
+    .windows-printers-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .win-printer-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+
+      &:hover {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.05);
+      }
+      &.selected {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.12);
+        box-shadow: 0 0 0 1px var(--primary);
+      }
+    }
+    .win-printer-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      .radio-circle {
+        font-size: 16px;
+        color: var(--primary);
+      }
+    }
+    .win-printer-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .win-printer-driver {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .selected-printer-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: var(--radius-sm);
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: var(--text-primary);
+      strong {
+        color: var(--primary-light);
+      }
+    }
+    .config-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 16px 0;
+    }
+    .info-alert {
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--text-primary);
+      margin: 12px 0;
     }
     .printer-details {
       display: flex;
@@ -2014,23 +2156,23 @@ export class SettingsComponent implements OnInit {
   testPrintResult = signal<TestPrintResult | null>(null);
   testingId = signal<string | null>(null);
 
-  // Printer Modals
+  // Printer Discovery & Modals
   showPrinterModal = signal(false);
   editingPrinter = signal<Printer | null>(null);
   savingPrinter = signal(false);
   deletingPrinter = signal<Printer | null>(null);
 
+  availableWindowsPrinters = signal<AvailablePrinter[]>([]);
+  loadingAvailablePrinters = signal(false);
+  selectedWindowsPrinter = signal<AvailablePrinter | null>(null);
+  refreshingPrinters = signal(false);
+
   printerForm: any = {
+    systemPrinterName: '',
     name: '',
-    model: '',
-    connectionType: 'NETWORK',
-    ipAddress: '',
-    port: 9100,
-    windowsPrinterName: '',
     paperWidth: 80,
     purpose: 'KITCHEN',
     kitchenId: null,
-    fallbackPrinterId: null,
     autoPrint: true,
     isPrimary: true,
     isDefault: false
@@ -2230,39 +2372,76 @@ export class SettingsComponent implements OnInit {
     });
   }
 
+  loadAvailableWindowsPrinters(): void {
+    this.loadingAvailablePrinters.set(true);
+    this.printerService.getAvailablePrinters().subscribe({
+      next: res => {
+        this.loadingAvailablePrinters.set(false);
+        if (res.success && res.data) {
+          this.availableWindowsPrinters.set(res.data);
+          if (res.data.length > 0 && !this.selectedWindowsPrinter()) {
+            this.selectWindowsPrinter(res.data[0]);
+          }
+        }
+      },
+      error: err => {
+        this.loadingAvailablePrinters.set(false);
+        this.showToast(err.error?.message || 'Windows printerlarini qidirishda xatolik', 'error');
+      }
+    });
+  }
+
+  selectWindowsPrinter(wp: AvailablePrinter): void {
+    this.selectedWindowsPrinter.set(wp);
+    this.printerForm.systemPrinterName = wp.systemPrinterName;
+    if (!this.printerForm.name || this.printerForm.name === this.selectedWindowsPrinter()?.displayName) {
+      this.printerForm.name = wp.displayName;
+    }
+  }
+
+  refreshPrinters(): void {
+    this.refreshingPrinters.set(true);
+    this.printerService.refreshPrinters().subscribe({
+      next: res => {
+        this.refreshingPrinters.set(false);
+        if (res.success && res.data) {
+          this.printers.set(res.data);
+          this.showToast('Windows printerlar holati yangilandi', 'success');
+        }
+      },
+      error: err => {
+        this.refreshingPrinters.set(false);
+        this.showToast(err.error?.message || 'Holatni yangilashda xatolik', 'error');
+      }
+    });
+  }
+
   openAddPrinterModal(): void {
     this.editingPrinter.set(null);
+    this.selectedWindowsPrinter.set(null);
     this.printerForm = {
+      systemPrinterName: '',
       name: '',
-      model: '',
-      connectionType: 'NETWORK',
-      ipAddress: '',
-      port: 9100,
-      windowsPrinterName: '',
       paperWidth: 80,
       purpose: 'KITCHEN',
       kitchenId: this.kitchens().length > 0 ? this.kitchens()[0].id : null,
-      fallbackPrinterId: null,
       autoPrint: true,
       isPrimary: true,
       isDefault: false
     };
     this.showPrinterModal.set(true);
+    this.loadAvailableWindowsPrinters();
   }
 
   editPrinter(p: Printer): void {
     this.editingPrinter.set(p);
+    this.selectedWindowsPrinter.set(null);
     this.printerForm = {
+      systemPrinterName: p.systemPrinterName || p.windowsPrinterName || '',
       name: p.name,
-      model: p.model || '',
-      connectionType: p.connectionType,
-      ipAddress: p.ipAddress || '',
-      port: p.port || 9100,
-      windowsPrinterName: p.windowsPrinterName || '',
       paperWidth: p.paperWidth || 80,
       purpose: p.purpose,
       kitchenId: p.assignedKitchenId || null,
-      fallbackPrinterId: p.fallbackPrinterId || null,
       autoPrint: p.autoPrint,
       isPrimary: p.isPrimaryForKitchen ?? true,
       isDefault: p.isDefault
@@ -2273,11 +2452,21 @@ export class SettingsComponent implements OnInit {
   closePrinterModal(): void {
     this.showPrinterModal.set(false);
     this.editingPrinter.set(null);
+    this.selectedWindowsPrinter.set(null);
   }
 
   savePrinter(): void {
+    if (!this.editingPrinter() && !this.printerForm.systemPrinterName) {
+      this.showToast('Iltimos, Windows printerini tanlang', 'error');
+      return;
+    }
+
     if (!this.printerForm.name || !this.printerForm.name.trim()) {
-      this.showToast('Printer nomini kiriting', 'error');
+      this.printerForm.name = this.printerForm.systemPrinterName;
+    }
+
+    if (this.printerForm.purpose === 'KITCHEN' && !this.printerForm.kitchenId) {
+      this.showToast('Oshxona printeri uchun oshxona bo\'limini tanlash majburiy', 'error');
       return;
     }
 

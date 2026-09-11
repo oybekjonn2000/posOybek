@@ -16,6 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -84,14 +87,22 @@ public class AuthService {
                 .map(p -> p.getCode())
                 .collect(Collectors.toSet());
 
+        Set<UUID> kitchenIds = user.getKitchens().stream()
+                .map(com.restaurantpos.kitchen.entity.Kitchen::getId)
+                .collect(Collectors.toSet());
+        UUID primaryKitchenId = kitchenIds.isEmpty() ? null : kitchenIds.iterator().next();
+        String role = user.getRoles().isEmpty() ? "STAFF" : user.getRoles().iterator().next().getName();
+
         UserPrincipal principal = UserPrincipal.builder()
                 .userId(user.getId())
                 .tenantId(user.getTenant().getId())
-                .kitchenId(user.getKitchen() != null ? user.getKitchen().getId() : null)
+                .kitchenId(primaryKitchenId)
+                .kitchenIds(kitchenIds)
                 .username(user.getUsername())
                 .password(user.getPasswordHash())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
+                .role(role)
                 .permissions(permissions)
                 .active(user.isActive())
                 .build();
@@ -104,6 +115,10 @@ public class AuthService {
         String refreshToken = jwtTokenProvider.generateRefreshToken(
                 principal.getUserId(), principal.getTenantId());
 
+        List<String> kitchenIdStrs = principal.getKitchenIds() != null
+                ? principal.getKitchenIds().stream().map(UUID::toString).collect(Collectors.toList())
+                : (principal.getKitchenId() != null ? List.of(principal.getKitchenId().toString()) : List.of());
+
         AuthDto.UserInfo userInfo = new AuthDto.UserInfo(
                 principal.getUserId().toString(),
                 principal.getUsername(),
@@ -111,6 +126,7 @@ public class AuthService {
                 principal.getTenantId().toString(),
                 principal.getRole(),
                 principal.getKitchenId() != null ? principal.getKitchenId().toString() : null,
+                kitchenIdStrs,
                 principal.getPermissions()
         );
 

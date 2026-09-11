@@ -70,6 +70,16 @@ public class TableController {
         return ResponseEntity.ok(ApiResponse.success(table, "Stol muvaffaqiyatli egallandi"));
     }
 
+    @PostMapping("/{id}/release")
+    @PreAuthorize("hasAnyAuthority('CREATE_ORDER', 'EDIT_ORDER', 'ROLE_ADMIN', 'ROLE_MANAGER', 'ROLE_WAITER')")
+    @Operation(summary = "Stolni bo'shatish (Buyurtmani bekor qilib stolni FREE qilish)")
+    public ResponseEntity<ApiResponse<TableDto.Response>> releaseTable(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserPrincipal user) {
+        TableDto.Response table = tableService.releaseTable(id, user.getTenantId(), user);
+        return ResponseEntity.ok(ApiResponse.success(table, "Stol muvaffaqiyatli bo'shatildi"));
+    }
+
 
     @PutMapping("/{id}/status")
     @Operation(summary = "Update table status (FREE, OCCUPIED, RESERVED, BILL_REQUESTED, CLEANING)")

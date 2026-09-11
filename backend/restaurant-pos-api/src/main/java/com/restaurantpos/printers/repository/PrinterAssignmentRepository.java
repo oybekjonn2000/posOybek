@@ -13,6 +13,8 @@ public interface PrinterAssignmentRepository extends JpaRepository<PrinterAssign
 
     List<PrinterAssignment> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
 
+    List<PrinterAssignment> findByTenantIdAndActiveTrueAndDeletedAtIsNull(UUID tenantId);
+
     List<PrinterAssignment> findByTenantIdAndKitchenIdAndActiveTrueAndDeletedAtIsNull(UUID tenantId, UUID kitchenId);
 
     Optional<PrinterAssignment> findByTenantIdAndKitchenIdAndPrimaryTrueAndActiveTrueAndDeletedAtIsNull(UUID tenantId, UUID kitchenId);

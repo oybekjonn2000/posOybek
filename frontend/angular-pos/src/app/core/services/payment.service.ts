@@ -27,6 +27,8 @@ export interface PaymentResponse {
   cashReceived?: number;
   changeGiven?: number;
   processedAt: string;
+  receiptPrintStatus?: string;
+  receiptPrintError?: string;
 }
 
 @Injectable({ providedIn: 'root' })

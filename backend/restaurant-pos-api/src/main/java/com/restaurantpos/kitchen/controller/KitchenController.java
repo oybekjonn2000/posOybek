@@ -29,9 +29,9 @@ public class KitchenController {
     public ResponseEntity<ApiResponse<List<KitchenDto.Response>>> getKitchens(
             @AuthenticationPrincipal UserPrincipal user) {
         List<KitchenDto.Response> kitchens = kitchenService.getKitchens(user.getTenantId());
-        if (user != null && user.getKitchenId() != null) {
+        if (user != null && user.isKitchen() && user.getKitchenIds() != null && !user.getKitchenIds().isEmpty()) {
             kitchens = kitchens.stream()
-                    .filter(k -> k.getId().equals(user.getKitchenId()))
+                    .filter(k -> user.getKitchenIds().contains(k.getId()))
                     .toList();
         }
         return ResponseEntity.ok(ApiResponse.success(kitchens));
@@ -74,11 +74,21 @@ public class KitchenController {
     public ResponseEntity<ApiResponse<List<OrderDto.Response>>> getKitchenOrders(
             @RequestParam(required = false) UUID kitchenId,
             @AuthenticationPrincipal UserPrincipal user) {
-        if (user != null && user.getKitchenId() != null) {
-            if (kitchenId != null && !kitchenId.equals(user.getKitchenId())) {
-                throw com.restaurantpos.common.exception.PosException.forbidden("Sizda boshqa oshxona ma'lumotlarini ko'rish huquqi yo'q!");
+        if (user != null && user.isKitchen()) {
+            java.util.Set<UUID> userKitchenIds = user.getKitchenIds();
+            if (userKitchenIds == null || userKitchenIds.isEmpty()) {
+                return ResponseEntity.ok(ApiResponse.success(List.of()));
             }
-            kitchenId = user.getKitchenId();
+            if (kitchenId != null) {
+                if (!userKitchenIds.contains(kitchenId)) {
+                    throw com.restaurantpos.common.exception.PosException.forbidden("Sizda boshqa oshxona ma'lumotlarini ko'rish huquqi yo'q!");
+                }
+                List<OrderDto.Response> orders = kitchenService.getActiveKitchenOrders(user.getTenantId(), kitchenId);
+                return ResponseEntity.ok(ApiResponse.success(orders));
+            } else {
+                List<OrderDto.Response> orders = kitchenService.getActiveKitchenOrdersForKitchens(user.getTenantId(), userKitchenIds);
+                return ResponseEntity.ok(ApiResponse.success(orders));
+            }
         }
         List<OrderDto.Response> orders = kitchenService.getActiveKitchenOrders(user.getTenantId(), kitchenId);
         return ResponseEntity.ok(ApiResponse.success(orders));
@@ -90,7 +100,11 @@ public class KitchenController {
     public ResponseEntity<ApiResponse<OrderDto.Response>> getKitchenOrder(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = kitchenService.getKitchenOrderById(id, user.getTenantId(), user != null ? user.getKitchenId() : null);
+        if (user != null && user.isKitchen()) {
+            OrderDto.Response order = kitchenService.getKitchenOrderByIdForKitchens(id, user.getTenantId(), user.getKitchenIds());
+            return ResponseEntity.ok(ApiResponse.success(order));
+        }
+        OrderDto.Response order = kitchenService.getKitchenOrderById(id, user.getTenantId(), null);
         return ResponseEntity.ok(ApiResponse.success(order));
     }
 
@@ -100,7 +114,12 @@ public class KitchenController {
     public ResponseEntity<ApiResponse<com.restaurantpos.kitchen.entity.KitchenTicket>> getKitchenTicket(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal user) {
-        com.restaurantpos.kitchen.entity.KitchenTicket ticket = kitchenService.getKitchenTicketById(id, user.getTenantId(), user != null ? user.getKitchenId() : null);
+        com.restaurantpos.kitchen.entity.KitchenTicket ticket = kitchenService.getKitchenTicketById(id, user.getTenantId(), null);
+        if (user != null && user.isKitchen() && ticket.getKitchen() != null) {
+            if (!user.hasKitchenAccess(ticket.getKitchen().getId())) {
+                throw com.restaurantpos.common.exception.PosException.forbidden("Sizda boshqa oshxona ma'lumotlarini ko'rish huquqi yo'q!");
+            }
+        }
         return ResponseEntity.ok(ApiResponse.success(ticket));
     }
 
@@ -119,7 +138,8 @@ public class KitchenController {
         if (targetStatus == null || targetStatus.isBlank()) {
             throw com.restaurantpos.common.exception.PosException.badRequest("Status is required");
         }
-        kitchenService.updateKitchenOrderStatus(id, user.getTenantId(), targetStatus, user != null ? user.getKitchenId() : null);
+        java.util.Set<UUID> allowedKitchenIds = (user != null && user.isKitchen()) ? user.getKitchenIds() : null;
+        kitchenService.updateKitchenOrderStatusForKitchens(id, user.getTenantId(), targetStatus, allowedKitchenIds);
         return ResponseEntity.ok(ApiResponse.success(null, "Kitchen order status updated"));
     }
 
@@ -130,7 +150,8 @@ public class KitchenController {
             @PathVariable UUID itemId,
             @RequestParam String status,
             @AuthenticationPrincipal UserPrincipal user) {
-        kitchenService.updateItemKitchenStatus(itemId, status, user != null ? user.getKitchenId() : null);
+        java.util.Set<UUID> allowedKitchenIds = (user != null && user.isKitchen()) ? user.getKitchenIds() : null;
+        kitchenService.updateItemKitchenStatusForKitchens(itemId, status, allowedKitchenIds);
         return ResponseEntity.ok(ApiResponse.success(null, "Kitchen item status updated"));
     }
 }

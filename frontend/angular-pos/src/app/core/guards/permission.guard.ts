@@ -19,6 +19,10 @@ export const permissionGuard: CanActivateFn = (route: ActivatedRouteSnapshot) =>
     return false;
   }
 
+  if (authService.isAdmin()) {
+    return true;
+  }
+
   const permission = route.data['permission'] as string;
 
   if (!permission || authService.hasPermission(permission)) {

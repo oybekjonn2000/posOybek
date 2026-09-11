@@ -6,6 +6,7 @@ import { OrderService, Order, OrderItem, CancellationReceipt } from '../../core/
 import { PaymentService, PaymentProcessRequest } from '../../core/services/payment.service';
 import { TableService, RestaurantTable } from '../../core/services/table.service';
 import { AuthService } from '../../core/services/auth.service';
+import { PrinterService } from '../../core/services/printer.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -1840,6 +1841,7 @@ export class OrdersListComponent implements OnInit {
     private orderService: OrderService,
     private paymentService: PaymentService,
     private tableService: TableService,
+    private printerService: PrinterService,
     private cdr: ChangeDetectorRef,
     public auth: AuthService
   ) {}
@@ -2143,7 +2145,7 @@ export class OrdersListComponent implements OnInit {
     };
 
     this.paymentService.processPayment(req).subscribe({
-      next: () => {
+      next: (res) => {
         this.processingPayment = false;
         // Also update table status to FREE if tableId exists
         if (this.selectedOrder?.tableId) {
@@ -2152,7 +2154,11 @@ export class OrdersListComponent implements OnInit {
             error: (e) => console.warn('Could not free table', e)
           });
         }
-        alert('To‘lov muvaffaqiyatli qabul qilindi! Stol bo‘shatildi.');
+        if (res?.data?.receiptPrintStatus === 'PRINT_FAILED') {
+          alert('To‘lov muvaffaqiyatli qabul qilindi, ammo chek chop etishda xatolik yuz berdi! Qayta chop etish tugmasi orqali qayta chiqarishingiz mumkin.');
+        } else {
+          alert('To‘lov muvaffaqiyatli qabul qilindi va chek chop etildi!');
+        }
         this.closeModals();
         this.loadOrders();
       },
@@ -2287,6 +2293,20 @@ export class OrdersListComponent implements OnInit {
   }
 
   printReceipt(): void {
-    window.print();
+    if (this.showCancelReceiptModal) {
+      window.print();
+      return;
+    }
+    if (!this.selectedOrder?.id) {
+      return;
+    }
+    this.printerService.reprintOrderReceipt(this.selectedOrder.id).subscribe({
+      next: () => {
+        alert('Kassa cheki Windows printerga qayta chop etishga yuborildi!');
+      },
+      error: (err) => {
+        alert('Chekni chop etishda xatolik: ' + (err.error?.message || err.message));
+      }
+    });
   }
 }

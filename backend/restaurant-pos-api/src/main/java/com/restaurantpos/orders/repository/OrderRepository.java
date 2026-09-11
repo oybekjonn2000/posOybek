@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,4 +51,17 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     default List<Order> findHistoryOrdersByWaiter(UUID tenantId, UUID waiterId) {
         return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES, waiterId);
     }
+
+    List<Order> findByTenantIdAndStatusAndPaidAtBetweenAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to);
+
+    List<Order> findByTenantIdAndStatusAndPaidAtBetweenAndWaiterIdAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to, UUID waiterId);
+
+    List<Order> findByTenantIdAndStatusAndClosedAtBetweenAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to);
+
+    List<Order> findByTenantIdAndOpenedAtBetweenAndDeletedAtIsNull(UUID tenantId, Instant from, Instant to);
+
+    long countByTenantIdAndStatusAndOpenedAtBetweenAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to);
+
+    long countByTenantIdAndStatusAndClosedAtBetweenAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to);
 }
+

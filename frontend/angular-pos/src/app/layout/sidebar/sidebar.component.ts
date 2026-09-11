@@ -215,20 +215,19 @@ export class SidebarComponent {
   collapsed = signal(false);
 
   navItems: NavItem[] = [
-    { icon: '📊', label: 'Dashboard', route: '/dashboard', permission: 'VIEW_DASHBOARD' },
-    { icon: '🖥️', label: 'POS', route: '/pos', permission: 'CREATE_ORDER' },
-    { icon: '🪑', label: 'Tables', route: '/tables' },
-    { icon: '📋', label: 'Orders', route: '/orders' },
-    { icon: '👨‍🍳', label: 'Kitchen', route: '/kitchen', permission: 'KITCHEN_VIEW' },
-    { icon: '🍔', label: 'Products', route: '/products', permission: 'MANAGE_PRODUCTS' },
-    { icon: '📁', label: 'Categories', route: '/categories', permission: 'MANAGE_CATEGORIES' },
-    { icon: '📦', label: 'Inventory', route: '/inventory', permission: 'VIEW_STOCK' },
-    { icon: '👥', label: 'Customers', route: '/customers', adminOnly: true },
-    { icon: '👤', label: 'Employees', route: '/employees', permission: 'MANAGE_USERS' },
-    { icon: '📈', label: 'Reports', route: '/reports', permission: 'VIEW_REPORTS' },
-    { icon: '💰', label: 'Shifts', route: '/shifts', adminOnly: true },
-    { icon: '📱', label: 'Devices', route: '/devices', permission: 'MANAGE_DEVICES' },
-    { icon: '⚙️', label: 'Settings', route: '/settings', permission: 'MANAGE_SETTINGS' },
+    { icon: '📊', label: 'Boshqaruv paneli', route: '/dashboard', permission: 'VIEW_DASHBOARD' },
+    { icon: '🖥️', label: 'Kassa (POS)', route: '/pos', permission: 'CREATE_ORDER' },
+    { icon: '🪑', label: 'Stollar', route: '/tables' },
+    { icon: '📋', label: 'Buyurtmalar', route: '/orders' },
+    { icon: '👨‍🍳', label: 'Oshxona', route: '/kitchen', permission: 'KITCHEN_VIEW' },
+    { icon: '🍔', label: 'Mahsulotlar', route: '/products', permission: 'MANAGE_PRODUCTS' },
+    { icon: '📁', label: 'Kategoriyalar', route: '/categories', permission: 'MANAGE_CATEGORIES' },
+    // { icon: '📦', label: 'Ombor', route: '/inventory', permission: 'VIEW_STOCK' }, // Hozircha disable qilindi
+    { icon: '👥', label: 'Mijozlar', route: '/customers', adminOnly: true },
+    { icon: '👤', label: 'Xodimlar', route: '/employees', permission: 'MANAGE_USERS' },
+    { icon: '📈', label: 'Hisobotlar', route: '/reports', permission: 'VIEW_REPORTS' },
+    { icon: '📱', label: 'Qurilmalar', route: '/devices', permission: 'MANAGE_DEVICES' },
+    { icon: '⚙️', label: 'Sozlamalar', route: '/settings', permission: 'MANAGE_SETTINGS' },
   ];
 
   constructor(public auth: AuthService) {}
@@ -249,6 +248,9 @@ export class SidebarComponent {
       // Waiter user must NOT see Kitchen
       if (role === 'WAITER' && item.route === '/kitchen') {
         return false;
+      }
+      if (this.auth.isAdmin()) {
+        return true;
       }
       return !item.permission || this.auth.hasPermission(item.permission);
     });

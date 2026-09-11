@@ -38,7 +38,7 @@ import { ConnectionService } from '../../core/services/connection.service';
         <!-- User menu -->
         <div class="topbar__user" (click)="logout()">
           <span>{{ auth.user()?.fullName }}</span>
-          <span style="color: var(--text-muted)">⟵ Logout</span>
+          <span style="color: var(--text-muted)">⟵ Chiqish</span>
         </div>
       </div>
     </header>

@@ -15,7 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.restaurantpos.orders.entity.OrderItem;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -78,7 +80,7 @@ public class TableService {
                 .build();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<TableDto.Response> getTables(UUID tenantId, UUID zoneId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
         List<RestaurantTable> tables = zoneId != null
                 ? tableRepository.findByTenantIdAndZoneIdAndDeletedAtIsNullOrderByTableNumberAsc(tenantId, zoneId)
@@ -100,12 +102,31 @@ public class TableService {
         return tables.stream()
                 .map(t -> {
                     Order order = t.getCurrentOrderId() != null ? finalOrdersMap.get(t.getCurrentOrderId()) : null;
+                    // Auto-heal: Agar stol band deb belgilangan bo'lsa, lekin buyurtma mavjud bo'lmasa, bekor qilingan bo'lsa yoki faol taomi bo'lmasa, stolni darhol BO'SH (FREE) holatga qaytarish
+                    if (t.getStatus() == RestaurantTable.TableStatus.OCCUPIED) {
+                        boolean hasActiveItems = order != null && order.getItems() != null &&
+                                order.getItems().stream().anyMatch(i -> !i.isVoided() && i.getKitchenStatus() != OrderItem.KitchenStatus.CANCELLED);
+                        boolean isOrderActive = order != null && order.getStatus() != Order.OrderStatus.CANCELLED && order.getStatus() != Order.OrderStatus.PAID;
+
+                        if (!isOrderActive || !hasActiveItems) {
+                            if (order != null && order.getStatus() == Order.OrderStatus.OPEN && (order.getItems() == null || order.getItems().isEmpty())) {
+                                order.setStatus(Order.OrderStatus.CANCELLED);
+                                order.setClosedAt(Instant.now());
+                                orderRepository.save(order);
+                            }
+                            t.setStatus(RestaurantTable.TableStatus.FREE);
+                            t.setCurrentOrderId(null);
+                            t.setWaiter(null);
+                            tableRepository.save(t);
+                            order = null;
+                        }
+                    }
                     return toResponse(t, order, currentUser);
                 })
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public TableDto.Response getTableById(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
         RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Table not found: " + id));
@@ -118,7 +139,49 @@ public class TableService {
         }
 
         Order order = table.getCurrentOrderId() != null ? orderRepository.findById(table.getCurrentOrderId()).orElse(null) : null;
+        if (table.getStatus() == RestaurantTable.TableStatus.OCCUPIED) {
+            boolean hasActiveItems = order != null && order.getItems() != null &&
+                    order.getItems().stream().anyMatch(i -> !i.isVoided() && i.getKitchenStatus() != OrderItem.KitchenStatus.CANCELLED);
+            boolean isOrderActive = order != null && order.getStatus() != Order.OrderStatus.CANCELLED && order.getStatus() != Order.OrderStatus.PAID;
+
+            if (!isOrderActive || !hasActiveItems) {
+                if (order != null && order.getStatus() == Order.OrderStatus.OPEN && (order.getItems() == null || order.getItems().isEmpty())) {
+                    order.setStatus(Order.OrderStatus.CANCELLED);
+                    order.setClosedAt(Instant.now());
+                    orderRepository.save(order);
+                }
+                table.setStatus(RestaurantTable.TableStatus.FREE);
+                table.setCurrentOrderId(null);
+                table.setWaiter(null);
+                table = tableRepository.save(table);
+                order = null;
+            }
+        }
         return toResponse(table, order, currentUser);
+    }
+
+    @Transactional
+    public TableDto.Response releaseTable(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal currentUser) {
+        RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
+                .orElseThrow(() -> PosException.notFound("Table not found: " + id));
+
+        if (table.getCurrentOrderId() != null) {
+            Order order = orderRepository.findById(table.getCurrentOrderId()).orElse(null);
+            if (order != null && order.getStatus() != Order.OrderStatus.PAID) {
+                order.setStatus(Order.OrderStatus.CANCELLED);
+                order.setClosedAt(Instant.now());
+                orderRepository.save(order);
+            }
+        }
+
+        table.setStatus(RestaurantTable.TableStatus.FREE);
+        table.setCurrentOrderId(null);
+        table.setWaiter(null);
+        RestaurantTable saved = tableRepository.save(table);
+
+        TableDto.Response res = toResponse(saved, null, currentUser);
+        wsNotification.notifyTableUpdated(tenantId, res);
+        return res;
     }
 
     @Transactional

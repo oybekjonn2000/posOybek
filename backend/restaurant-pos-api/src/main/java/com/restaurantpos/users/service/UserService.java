@@ -4,6 +4,8 @@ import com.restaurantpos.common.exception.PosException;
 import com.restaurantpos.tenants.entity.Tenant;
 import com.restaurantpos.tenants.repository.TenantRepository;
 import com.restaurantpos.users.dto.UserDto;
+import com.restaurantpos.kitchen.entity.Kitchen;
+import com.restaurantpos.users.entity.EmployeeKitchen;
 import com.restaurantpos.users.entity.Role;
 import com.restaurantpos.users.entity.User;
 import com.restaurantpos.users.repository.RoleRepository;
@@ -16,10 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,6 +30,7 @@ public class UserService {
     private final RoleRepository roleRepository;
     private final TenantRepository tenantRepository;
     private final PasswordEncoder passwordEncoder;
+    private final com.restaurantpos.kitchen.repository.KitchenRepository kitchenRepository;
 
     @Transactional(readOnly = true)
     public List<UserDto.Response> getAllUsers(UUID tenantId) {
@@ -81,6 +81,24 @@ public class UserService {
         }
         user.setRoles(roles);
 
+        String createRoleName = roles.isEmpty() ? (request.getRole() != null ? request.getRole().toUpperCase() : "STAFF") : roles.iterator().next().getName();
+        boolean isCreateKitchenRole = "KITCHEN".equalsIgnoreCase(createRoleName);
+
+        if (isCreateKitchenRole) {
+            if (request.getKitchenIds() == null || request.getKitchenIds().isEmpty()) {
+                throw PosException.badRequest("Oshpaz kamida bitta oshxonaga biriktirilishi kerak.");
+            }
+            Set<UUID> uniqueKitchenIds = new LinkedHashSet<>(request.getKitchenIds());
+            for (UUID kId : uniqueKitchenIds) {
+                Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kId, tenantId)
+                        .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kId));
+                user.getEmployeeKitchens().add(new EmployeeKitchen(tenant, user, kitchen));
+            }
+            if (!user.getEmployeeKitchens().isEmpty()) {
+                user.setKitchen(user.getEmployeeKitchens().iterator().next().getKitchen());
+            }
+        }
+
         User saved = userRepository.save(user);
         log.info("User created: {} with id {}", saved.getUsername(), saved.getId());
         return mapToResponse(saved);
@@ -118,6 +136,40 @@ public class UserService {
             roleRepository.findByNameAndTenantIdAndDeletedAtIsNull(request.getRole().toUpperCase(), tenantId)
                     .ifPresent(roles::add);
             user.setRoles(roles);
+        }
+
+        String editRoleName = user.getRoles().isEmpty() ? (request.getRole() != null ? request.getRole().toUpperCase() : "STAFF") : user.getRoles().iterator().next().getName();
+        boolean isEditKitchenRole = "KITCHEN".equalsIgnoreCase(editRoleName);
+
+        if (isEditKitchenRole) {
+            if (request.getKitchenIds() == null || request.getKitchenIds().isEmpty()) {
+                throw PosException.badRequest("Oshpaz kamida bitta oshxonaga biriktirilishi kerak.");
+            }
+            Set<UUID> uniqueKitchenIds = new LinkedHashSet<>(request.getKitchenIds());
+
+            // Remove any kitchen assignments that are no longer selected
+            user.getEmployeeKitchens().removeIf(ek -> !uniqueKitchenIds.contains(ek.getKitchen().getId()));
+
+            // Identify kitchens that are already assigned
+            Set<UUID> existingKitchenIds = user.getEmployeeKitchens().stream()
+                    .map(ek -> ek.getKitchen().getId())
+                    .collect(Collectors.toSet());
+
+            // Add newly selected kitchens
+            for (UUID kId : uniqueKitchenIds) {
+                if (!existingKitchenIds.contains(kId)) {
+                    Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kId, tenantId)
+                            .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kId));
+                    user.getEmployeeKitchens().add(new EmployeeKitchen(user.getTenant(), user, kitchen));
+                }
+            }
+
+            if (!user.getEmployeeKitchens().isEmpty()) {
+                user.setKitchen(user.getEmployeeKitchens().iterator().next().getKitchen());
+            }
+        } else if (request.getRole() != null || request.getRoleId() != null) {
+            user.getEmployeeKitchens().clear();
+            user.setKitchen(null);
         }
 
         User updated = userRepository.save(user);
@@ -170,6 +222,31 @@ public class UserService {
                 .distinct()
                 .collect(Collectors.toList());
 
+        List<UUID> kitchenIds = user.getEmployeeKitchens() != null
+                ? user.getEmployeeKitchens().stream()
+                .map(ek -> ek.getKitchen().getId())
+                .collect(Collectors.toList())
+                : new ArrayList<>();
+
+        List<UserDto.KitchenSummary> kitchens = user.getEmployeeKitchens() != null
+                ? user.getEmployeeKitchens().stream()
+                .map(ek -> UserDto.KitchenSummary.builder()
+                        .id(ek.getKitchen().getId())
+                        .name(ek.getKitchen().getName())
+                        .code(ek.getKitchen().getCode())
+                        .build())
+                .collect(Collectors.toList())
+                : new ArrayList<>();
+
+        if (kitchenIds.isEmpty() && user.getKitchen() != null) {
+            kitchenIds = List.of(user.getKitchen().getId());
+            kitchens = List.of(UserDto.KitchenSummary.builder()
+                    .id(user.getKitchen().getId())
+                    .name(user.getKitchen().getName())
+                    .code(user.getKitchen().getCode())
+                    .build());
+        }
+
         return UserDto.Response.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -182,6 +259,8 @@ public class UserService {
                 .role(roleName)
                 .roleId(roleId)
                 .permissions(permissions)
+                .kitchenIds(kitchenIds)
+                .kitchens(kitchens)
                 .lastLoginAt(user.getLastLoginAt())
                 .createdAt(user.getCreatedAt())
                 .build();

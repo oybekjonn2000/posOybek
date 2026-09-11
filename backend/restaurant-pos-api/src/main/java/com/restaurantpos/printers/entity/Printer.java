@@ -30,7 +30,7 @@ public class Printer {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "connection_type", nullable = false, length = 30)
-    private ConnectionType connectionType = ConnectionType.NETWORK;
+    private ConnectionType connectionType = ConnectionType.WINDOWS;
 
     @Column(name = "ip_address", length = 45)
     private String ipAddress;
@@ -40,6 +40,14 @@ public class Printer {
 
     @Column(name = "windows_printer_name")
     private String windowsPrinterName;
+
+    public String getSystemPrinterName() {
+        return this.windowsPrinterName;
+    }
+
+    public void setSystemPrinterName(String systemPrinterName) {
+        this.windowsPrinterName = systemPrinterName;
+    }
 
     @Column(name = "paper_width", nullable = false)
     private int paperWidth = 80; // 58 or 80 mm
@@ -91,11 +99,11 @@ public class Printer {
     }
 
     public enum PrinterPurpose {
-        KITCHEN, CASHIER, RECEIPT, BAR, OTHER
+        KITCHEN, CASHIER
     }
 
     public enum PrinterStatus {
-        ONLINE, OFFLINE, ERROR, UNKNOWN
+        ONLINE, OFFLINE, NOT_FOUND, ERROR, UNKNOWN
     }
 
     @PreUpdate

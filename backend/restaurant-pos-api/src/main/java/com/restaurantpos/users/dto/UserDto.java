@@ -32,6 +32,7 @@ public class UserDto {
         private String pin;
         private String role;
         private UUID roleId;
+        private List<UUID> kitchenIds;
     }
 
     @Getter
@@ -47,6 +48,7 @@ public class UserDto {
         private String role;
         private UUID roleId;
         private Boolean active;
+        private List<UUID> kitchenIds;
     }
 
     @Getter
@@ -72,6 +74,8 @@ public class UserDto {
         private String role;
         private UUID roleId;
         private List<String> permissions;
+        private List<UUID> kitchenIds;
+        private List<KitchenSummary> kitchens;
         private Instant lastLoginAt;
         private Instant createdAt;
     }
@@ -83,5 +87,16 @@ public class UserDto {
         private UUID id;
         private String name;
         private String description;
+    }
+
+    @Getter
+    @Setter
+    @lombok.AllArgsConstructor
+    @lombok.NoArgsConstructor
+    @Builder
+    public static class KitchenSummary {
+        private UUID id;
+        private String name;
+        private String code;
     }
 }

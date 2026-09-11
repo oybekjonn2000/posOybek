@@ -15,6 +15,7 @@ import com.restaurantpos.users.entity.User;
 import com.restaurantpos.users.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
@@ -39,6 +41,7 @@ public class PaymentService {
     private final com.restaurantpos.common.websocket.WebSocketNotificationService wsNotification;
     private final com.restaurantpos.orders.service.OrderService orderService;
     private final com.restaurantpos.printers.service.PrintRoutingService printRoutingService;
+    private final com.restaurantpos.inventory.service.InventoryService inventoryService;
 
     private long nextPaymentSequence() {
         return ((Number) entityManager
@@ -47,79 +50,98 @@ public class PaymentService {
 
     @Transactional
     public PaymentDto.Response processPayment(UUID tenantId, UUID cashierId, PaymentDto.ProcessRequest request) {
-        Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getOrderId(), tenantId)
-                .orElseThrow(() -> PosException.notFound("Order not found: " + request.getOrderId()));
+        log.info("[PAYMENT_STARTED] Processing payment for orderId: {}, cashierId: {}, amount: {}, method: {}",
+                request.getOrderId(), cashierId, request.getAmount(), request.getPaymentMethod());
 
-        if (order.getStatus() == Order.OrderStatus.PAID) {
-            throw PosException.badRequest("Order is already paid");
-        }
-
-        User cashier = userRepository.findById(cashierId).orElse(null);
-        Shift shift = shiftRepository.findByTenantIdAndStatus(tenantId, Shift.ShiftStatus.OPEN).orElse(null);
-
-        Payment payment = new Payment();
-        payment.setTenant(order.getTenant());
-        payment.setOrder(order);
-        payment.setShift(shift);
-        payment.setCashier(cashier);
-        payment.setDevice(order.getDevice());
-
-        String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
-        payment.setPaymentNumber("PAY-" + dateStr + "-" + String.format("%04d", nextPaymentSequence()));
-
-        Payment.PaymentMethod method = Payment.PaymentMethod.valueOf(request.getPaymentMethod().toUpperCase());
-        payment.setPaymentMethod(method);
-        payment.setStatus(Payment.PaymentStatus.COMPLETED);
-        payment.setAmount(request.getAmount());
-        payment.setCashAmount(request.getCashAmount() != null ? request.getCashAmount() : BigDecimal.ZERO);
-        payment.setCardAmount(request.getCardAmount() != null ? request.getCardAmount() : BigDecimal.ZERO);
-        payment.setChangeAmount(request.getChangeAmount() != null ? request.getChangeAmount() : BigDecimal.ZERO);
-        payment.setReferenceNumber(request.getReferenceNumber());
-        payment.setNotes(request.getNotes());
-        payment.setPaidAt(Instant.now());
-
-        Payment saved = paymentRepository.save(payment);
-
-        // Update Order status to PAID
-        order.setStatus(Order.OrderStatus.PAID);
-        order.setCashier(cashier);
-        Instant now = Instant.now();
-        order.setPaidAt(now);
-        order.setClosedAt(now);
-        Order savedOrder = orderRepository.save(order);
-
-        // Hardware Print Routing: dispatch receipt to Cashier printer
         try {
-            printRoutingService.routeAndPrintReceipt(savedOrder, saved);
-        } catch (Exception pex) {
-            // Receipt print error never aborts completed payment
+            Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getOrderId(), tenantId)
+                    .orElseThrow(() -> PosException.notFound("Order not found: " + request.getOrderId()));
+
+            if (order.getStatus() == Order.OrderStatus.PAID) {
+                throw PosException.badRequest("Order is already paid");
+            }
+
+            User cashier = userRepository.findById(cashierId).orElse(null);
+            Shift shift = shiftRepository.findByTenantIdAndStatus(tenantId, Shift.ShiftStatus.OPEN).orElse(null);
+
+            Payment payment = new Payment();
+            payment.setTenant(order.getTenant());
+            payment.setOrder(order);
+            payment.setShift(shift);
+            payment.setCashier(cashier);
+            payment.setDevice(order.getDevice());
+
+            String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+            payment.setPaymentNumber("PAY-" + dateStr + "-" + String.format("%04d", nextPaymentSequence()));
+
+            Payment.PaymentMethod method = Payment.PaymentMethod.valueOf(request.getPaymentMethod().toUpperCase());
+            payment.setPaymentMethod(method);
+            payment.setStatus(Payment.PaymentStatus.COMPLETED);
+            payment.setAmount(request.getAmount());
+            payment.setCashAmount(request.getCashAmount() != null ? request.getCashAmount() : BigDecimal.ZERO);
+            payment.setCardAmount(request.getCardAmount() != null ? request.getCardAmount() : BigDecimal.ZERO);
+            payment.setChangeAmount(request.getChangeAmount() != null ? request.getChangeAmount() : BigDecimal.ZERO);
+            payment.setReferenceNumber(request.getReferenceNumber());
+            payment.setNotes(request.getNotes());
+            payment.setPaidAt(Instant.now());
+
+            Payment saved = paymentRepository.save(payment);
+
+            log.info("[PAYMENT_SUCCESS] Payment completed successfully. paymentId: {}, paymentNumber: {}, orderId: {}, amount: {}",
+                    saved.getId(), saved.getPaymentNumber(), order.getId(), saved.getAmount());
+
+            // Update Order status to PAID
+            order.setStatus(Order.OrderStatus.PAID);
+            order.setCashier(cashier);
+            Instant now = Instant.now();
+            order.setPaidAt(now);
+            order.setClosedAt(now);
+            Order savedOrder = orderRepository.save(order);
+
+            // Deduct inventory items via recipes (atomic & idempotent)
+            try {
+                inventoryService.deductStockForPaidOrder(savedOrder);
+            } catch (Exception invEx) {
+                log.error("Error deducting inventory for paid order {}: {}", order.getId(), invEx.getMessage());
+            }
+
+            // Hardware Print Routing: dispatch receipt to Cashier printer
+            try {
+                savedOrder = printRoutingService.routeAndPrintReceipt(savedOrder, saved);
+                saved.setOrder(savedOrder);
+            } catch (Exception pex) {
+                log.warn("Receipt print warning during payment: {}", pex.getMessage());
+            }
+
+            // Free the table
+            if (order.getTable() != null) {
+                RestaurantTable table = order.getTable();
+                table.setStatus(com.restaurantpos.tables.entity.RestaurantTable.TableStatus.FREE);
+                table.setCurrentOrderId(null);
+                table.setWaiter(null);
+                RestaurantTable savedTable = tableRepository.save(table);
+                wsNotification.notifyTableUpdated(tenantId, orderService.toTableResponse(savedTable, null));
+            }
+
+            // Notify order status changed & paid
+            OrderDto.Response orderResponse = orderService.toResponse(savedOrder);
+            wsNotification.notifyOrderStatusChanged(tenantId, orderResponse);
+            wsNotification.notifyOrderPaid(tenantId, order.getId());
+
+            // Update Shift totals if shift is active
+            if (shift != null) {
+                shift.setTotalSales(shift.getTotalSales().add(payment.getAmount()));
+                shift.setTotalCashSales(shift.getTotalCashSales().add(payment.getCashAmount()));
+                shift.setTotalCardSales(shift.getTotalCardSales().add(payment.getCardAmount()));
+                shift.setOrdersCount(shift.getOrdersCount() + 1);
+                shiftRepository.save(shift);
+            }
+
+            return toResponse(saved);
+        } catch (Exception ex) {
+            log.warn("[PAYMENT_FAILED] Payment failed for orderId: {}, reason: {}", request.getOrderId(), ex.getMessage());
+            throw ex;
         }
-
-        // Free the table
-        if (order.getTable() != null) {
-            RestaurantTable table = order.getTable();
-            table.setStatus(com.restaurantpos.tables.entity.RestaurantTable.TableStatus.FREE);
-            table.setCurrentOrderId(null);
-            table.setWaiter(null);
-            RestaurantTable savedTable = tableRepository.save(table);
-            wsNotification.notifyTableUpdated(tenantId, orderService.toTableResponse(savedTable, null));
-        }
-
-        // Notify order status changed & paid
-        OrderDto.Response orderResponse = orderService.toResponse(savedOrder);
-        wsNotification.notifyOrderStatusChanged(tenantId, orderResponse);
-        wsNotification.notifyOrderPaid(tenantId, order.getId());
-
-        // Update Shift totals if shift is active
-        if (shift != null) {
-            shift.setTotalSales(shift.getTotalSales().add(payment.getAmount()));
-            shift.setTotalCashSales(shift.getTotalCashSales().add(payment.getCashAmount()));
-            shift.setTotalCardSales(shift.getTotalCardSales().add(payment.getCardAmount()));
-            shift.setOrdersCount(shift.getOrdersCount() + 1);
-            shiftRepository.save(shift);
-        }
-
-        return toResponse(saved);
     }
 
     @Transactional
@@ -177,6 +199,10 @@ public class PaymentService {
     }
 
     private PaymentDto.Response toResponse(Payment payment) {
+        Order ord = payment.getOrder();
+        String printStatus = ord != null && ord.getReceiptPrintStatus() != null ? ord.getReceiptPrintStatus().name() : null;
+        String printError = ord != null ? ord.getReceiptPrintError() : null;
+
         return PaymentDto.Response.builder()
                 .id(payment.getId())
                 .orderId(payment.getOrder() != null ? payment.getOrder().getId() : null)
@@ -193,6 +219,8 @@ public class PaymentService {
                 .paidAt(payment.getPaidAt())
                 .cashierId(payment.getCashier() != null ? payment.getCashier().getId() : null)
                 .cashierName(payment.getCashier() != null ? payment.getCashier().getFirstName() + " " + (payment.getCashier().getLastName() != null ? payment.getCashier().getLastName() : "") : null)
+                .receiptPrintStatus(printStatus)
+                .receiptPrintError(printError)
                 .build();
     }
 }

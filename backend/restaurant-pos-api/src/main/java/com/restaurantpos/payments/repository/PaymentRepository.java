@@ -20,6 +20,8 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
     Optional<Payment> findByIdAndTenantId(UUID id, UUID tenantId);
 
+    List<Payment> findByTenantIdAndPaidAtBetween(UUID tenantId, Instant from, Instant to);
+
     // Reports uchun
     List<Payment> findByTenantIdAndPaidAtBetweenAndRefundFalse(UUID tenantId, Instant from, Instant to);
 

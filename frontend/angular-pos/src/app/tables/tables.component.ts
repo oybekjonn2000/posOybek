@@ -145,9 +145,16 @@ import { WebsocketService } from '../core/services/websocket.service';
                     🚫 Biriktirilgan
                   </button>
                 } @else {
-                  <button class="btn-action btn-action--view">
-                    👀 OCHISH
-                  </button>
+                  <div class="table-card__btn-group">
+                    <button class="btn-action btn-action--view">
+                      👀 OCHISH
+                    </button>
+                    @if (!table.itemCount || table.itemCount === 0) {
+                      <button class="btn-action btn-action--release" (click)="onReleaseTable($event, table)" title="Bo'sh stolni bo'shatish">
+                        🔓 Bo'shatish
+                      </button>
+                    }
+                  </div>
                 }
               </div>
             </div>
@@ -529,6 +536,18 @@ import { WebsocketService } from '../core/services/websocket.service';
         color: var(--text-muted);
         cursor: not-allowed;
       }
+
+      &--release {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        &:hover { background: #f59e0b; color: white; }
+      }
+    }
+
+    .table-card__btn-group {
+      display: flex;
+      gap: 6px;
+      width: 100%;
     }
 
     .btn {
@@ -833,24 +852,13 @@ export class TablesComponent implements OnInit, OnDestroy {
     }
 
     if (table.status === 'FREE') {
-      this.tableService.occupyTable(table.id).subscribe({
-        next: (res) => {
-          if (res.success && res.data) {
-            const occupied = res.data;
-            this.router.navigate(['/pos'], {
-              queryParams: {
-                tableId: occupied.id,
-                tableNumber: occupied.tableNumber,
-                tableName: occupied.name,
-                orderId: occupied.currentOrderId
-              }
-            });
-          }
-        },
-        error: (err) => {
-          const msg = err.error?.message || "Bu stol boshqa ofitsantga biriktirilgan.";
-          this.notify.error(msg);
-          this.loadTables();
+      // Yangi buyurtma: stolda mahsulot tanlanmasdan oldin bazada bo'sh buyurtma yaratilmaydi.
+      // Mahsulot tanlanib "Oshxonaga yuborish" bosilgandagina buyurtma yaratiladi va stol band qilinadi.
+      this.router.navigate(['/pos'], {
+        queryParams: {
+          tableId: table.id,
+          tableNumber: table.tableNumber,
+          tableName: table.name
         }
       });
       return;
@@ -862,6 +870,21 @@ export class TablesComponent implements OnInit, OnDestroy {
         tableNumber: table.tableNumber,
         tableName: table.name,
         orderId: table.currentOrderId
+      }
+    });
+  }
+
+  onReleaseTable(event: Event, table: RestaurantTable): void {
+    event.stopPropagation();
+    this.tableService.releaseTable(table.id).subscribe({
+      next: (res) => {
+        if (res.success) {
+          this.notify.success(`Stol #${table.tableNumber} muvaffaqiyatli bo'shatildi`);
+          this.loadTables();
+        }
+      },
+      error: (err) => {
+        this.notify.error(err.error?.message || "Stolni bo'shatishda xatolik yuz berdi");
       }
     });
   }

@@ -72,16 +72,24 @@ public class AuthDto {
         private final String tenantId;
         private final String role;
         private final String kitchenId;
+        private final java.util.List<String> kitchenIds;
         private final java.util.Set<String> permissions;
 
         public UserInfo(String id, String username, String fullName, String tenantId,
                         String role, String kitchenId, java.util.Set<String> permissions) {
+            this(id, username, fullName, tenantId, role, kitchenId, 
+                 kitchenId != null ? java.util.List.of(kitchenId) : java.util.List.of(), permissions);
+        }
+
+        public UserInfo(String id, String username, String fullName, String tenantId,
+                        String role, String kitchenId, java.util.List<String> kitchenIds, java.util.Set<String> permissions) {
             this.id = id;
             this.username = username;
             this.fullName = fullName;
             this.tenantId = tenantId;
             this.role = role;
             this.kitchenId = kitchenId;
+            this.kitchenIds = kitchenIds != null ? kitchenIds : java.util.List.of();
             this.permissions = permissions;
         }
     }

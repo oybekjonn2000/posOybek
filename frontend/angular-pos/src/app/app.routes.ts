@@ -65,10 +65,16 @@ export const routes: Routes = [
         canActivate: [permissionGuard],
         data: { permission: 'MANAGE_CATEGORIES', title: 'Categories' }
       },
+      // Ombor moduli vaqtinchalik disable qilingan:
+      // {
+      //   path: 'inventory',
+      //   loadChildren: () => import('./inventory/inventory.routes').then(m => m.INVENTORY_ROUTES),
+      //   data: { title: 'Inventory' }
+      // },
       {
         path: 'inventory',
-        loadChildren: () => import('./inventory/inventory.routes').then(m => m.INVENTORY_ROUTES),
-        data: { title: 'Inventory' }
+        redirectTo: 'dashboard',
+        pathMatch: 'full'
       },
       {
         path: 'customers',
@@ -102,9 +108,8 @@ export const routes: Routes = [
       },
       {
         path: 'shifts',
-        loadComponent: () => import('./shifts/shifts.component').then(m => m.ShiftsComponent),
-        canActivate: [adminGuard],
-        data: { title: 'Shifts' }
+        redirectTo: 'dashboard',
+        pathMatch: 'full'
       }
     ]
   },

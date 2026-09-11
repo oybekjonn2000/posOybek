@@ -32,6 +32,8 @@ public class PaymentDto {
         private Instant paidAt;
         private UUID cashierId;
         private String cashierName;
+        private String receiptPrintStatus;
+        private String receiptPrintError;
     }
 
     @Data

@@ -156,4 +156,21 @@ public class Order extends BaseEntity {
     public enum OrderStatus {
         OPEN, IN_PROGRESS, READY, PAID, CANCELLED, REFUNDED
     }
+
+    public enum ReceiptPrintStatus {
+        NOT_PRINTED, PRINTING, PRINTED, PRINT_FAILED
+    }
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "receipt_print_status", nullable = false, length = 30)
+    private ReceiptPrintStatus receiptPrintStatus = ReceiptPrintStatus.NOT_PRINTED;
+
+    @Column(name = "receipt_printed_at")
+    private Instant receiptPrintedAt;
+
+    @Column(name = "receipt_print_attempts", nullable = false)
+    private int receiptPrintAttempts = 0;
+
+    @Column(name = "receipt_print_error")
+    private String receiptPrintError;
 }

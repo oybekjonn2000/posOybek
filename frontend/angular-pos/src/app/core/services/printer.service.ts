@@ -4,6 +4,14 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { ApiResponse } from './auth.service';
 
+export interface AvailablePrinter {
+  systemPrinterName: string;
+  displayName: string;
+  driverName?: string;
+  isDefault: boolean;
+  status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN';
+}
+
 export interface Printer {
   id: string;
   name: string;
@@ -12,10 +20,11 @@ export interface Printer {
   ipAddress?: string;
   port?: number;
   windowsPrinterName?: string;
+  systemPrinterName?: string;
   paperWidth: number;
   characterEncoding: string;
-  purpose: 'KITCHEN' | 'CASHIER' | 'RECEIPT' | 'BAR' | 'OTHER';
-  status: 'ONLINE' | 'OFFLINE' | 'ERROR' | 'UNKNOWN';
+  purpose: 'KITCHEN' | 'CASHIER';
+  status: 'ONLINE' | 'OFFLINE' | 'NOT_FOUND' | 'ERROR' | 'UNKNOWN';
   active: boolean;
   isDefault: boolean;
   autoPrint: boolean;
@@ -31,14 +40,11 @@ export interface Printer {
 }
 
 export interface CreatePrinterRequest {
-  name: string;
+  systemPrinterName: string;
+  name?: string;
   model?: string;
-  connectionType: string;
-  ipAddress?: string;
-  port?: number;
-  windowsPrinterName?: string;
+  connectionType?: string;
   paperWidth?: number;
-  characterEncoding?: string;
   purpose: string;
   autoPrint?: boolean;
   isDefault?: boolean;
@@ -48,14 +54,10 @@ export interface CreatePrinterRequest {
 }
 
 export interface UpdatePrinterRequest {
+  systemPrinterName?: string;
   name?: string;
   model?: string;
-  connectionType?: string;
-  ipAddress?: string;
-  port?: number;
-  windowsPrinterName?: string;
   paperWidth?: number;
-  characterEncoding?: string;
   purpose?: string;
   status?: string;
   active?: boolean;
@@ -97,6 +99,14 @@ export class PrinterService {
   private readonly API = `${environment.apiUrl}/printers`;
 
   constructor(private http: HttpClient) {}
+
+  getAvailablePrinters(): Observable<ApiResponse<AvailablePrinter[]>> {
+    return this.http.get<ApiResponse<AvailablePrinter[]>>(`${this.API}/available`);
+  }
+
+  refreshPrinters(): Observable<ApiResponse<Printer[]>> {
+    return this.http.post<ApiResponse<Printer[]>>(`${this.API}/refresh`, {});
+  }
 
   getPrinters(): Observable<ApiResponse<Printer[]>> {
     return this.http.get<ApiResponse<Printer[]>>(this.API);

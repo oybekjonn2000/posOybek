@@ -76,6 +76,10 @@ export class TableService {
     return this.http.post<ApiResponse<RestaurantTable>>(`${this.API}/${id}/occupy`, {});
   }
 
+  releaseTable(id: string): Observable<ApiResponse<RestaurantTable>> {
+    return this.http.post<ApiResponse<RestaurantTable>>(`${this.API}/${id}/release`, {});
+  }
+
   updateTableStatus(id: string, status: string, currentOrderId?: string): Observable<ApiResponse<RestaurantTable>> {
     return this.http.put<ApiResponse<RestaurantTable>>(`${this.API}/${id}/status`, { status, currentOrderId });
   }

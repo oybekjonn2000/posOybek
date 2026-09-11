@@ -73,6 +73,15 @@ import { Order, OrderItem } from '../core/services/order.service';
         <span class="stations-label">Oshxona Stansiyasi:</span>
         <div class="stations-strip">
           <button
+            *ngIf="kitchens.length > 1"
+            class="station-tab"
+            [class.active]="selectedKitchen === null"
+            (click)="selectKitchen(null)">
+            <span class="station-icon">🍽️</span>
+            <span class="station-name">Barchasi</span>
+            <span class="station-code">BARCHA BIRIKTIRILGANLAR</span>
+          </button>
+          <button
             *ngFor="let k of kitchens"
             class="station-tab"
             [class.active]="selectedKitchen?.id === k.id"
@@ -905,7 +914,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
     timestamp: Date;
   } | null = null;
 
-  private currentWsUnsub?: () => void;
+  private wsUnsubs: (() => void)[] = [];
   private timerTick?: any;
 
   constructor(
@@ -925,9 +934,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.currentWsUnsub) {
-      this.currentWsUnsub();
-    }
+    this.unsubscribeAllStations();
     if (this.timerTick) {
       clearInterval(this.timerTick);
     }
@@ -937,6 +944,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
     this.kitchenService.getKitchens().subscribe({
       next: (res) => {
         this.kitchens = res.data || [];
+        this.subscribeToAllKitchenStations();
         if (this.kitchens.length > 0 && !this.selectedKitchen) {
           this.selectKitchen(this.kitchens[0]);
         }
@@ -949,24 +957,27 @@ export class KitchenComponent implements OnInit, OnDestroy {
     });
   }
 
-  selectKitchen(k: KitchenStation): void {
+  selectKitchen(k: KitchenStation | null): void {
     this.selectedKitchen = k;
-    this.subscribeToKitchenStation(k.id);
     this.loadOrders();
     this.cdr.markForCheck();
   }
 
-  private subscribeToKitchenStation(kitchenId: string): void {
-    if (this.currentWsUnsub) {
-      this.currentWsUnsub();
-      this.currentWsUnsub = undefined;
-    }
+  private unsubscribeAllStations(): void {
+    this.wsUnsubs.forEach(unsub => unsub());
+    this.wsUnsubs = [];
+  }
 
-    console.log(`[KDS] Real-time kanalga obuna bo'linmoqda: /topic/kitchen/${kitchenId}`);
-    this.currentWsUnsub = this.wsService.subscribeToKitchen(kitchenId, (event) => {
-      console.log(`[KDS Event /topic/kitchen/${kitchenId}]:`, event);
-      this.handleRealtimeMessage(event);
-    });
+  private subscribeToAllKitchenStations(): void {
+    this.unsubscribeAllStations();
+    for (const k of this.kitchens) {
+      console.log(`[KDS] Real-time kanalga obuna bo'linmoqda: /topic/kitchen/${k.id}`);
+      const unsub = this.wsService.subscribeToKitchen(k.id, (event) => {
+        console.log(`[KDS Event /topic/kitchen/${k.id}]:`, event);
+        this.handleRealtimeMessage(event);
+      });
+      this.wsUnsubs.push(unsub);
+    }
   }
 
   private handleRealtimeMessage(event: any): void {
@@ -980,6 +991,11 @@ export class KitchenComponent implements OnInit, OnDestroy {
       if (this.selectedKitchen && incomingOrder.items) {
         incomingOrder.items = incomingOrder.items.filter(i => 
           !i.kitchenId || i.kitchenId === this.selectedKitchen?.id
+        );
+      } else if (incomingOrder.items) {
+        const allowedIds = new Set(this.kitchens.map(k => k.id));
+        incomingOrder.items = incomingOrder.items.filter(i =>
+          !i.kitchenId || allowedIds.has(i.kitchenId)
         );
       }
 

@@ -22,6 +22,7 @@ public class UserPrincipal implements UserDetails {
     private final UUID userId;
     private final UUID tenantId;
     private final UUID kitchenId;
+    private final Set<UUID> kitchenIds;
     private final UUID deviceId;
     private final String username;
     private final String password;
@@ -86,6 +87,13 @@ public class UserPrincipal implements UserDetails {
 
     public boolean isAdminOrManager() {
         return "ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role);
+    }
+
+    public boolean hasKitchenAccess(UUID kId) {
+        if (isAdminOrManager()) return true;
+        if (kId == null) return false;
+        if (kitchenIds != null && kitchenIds.contains(kId)) return true;
+        return kitchenId != null && kitchenId.equals(kId);
     }
 }
 

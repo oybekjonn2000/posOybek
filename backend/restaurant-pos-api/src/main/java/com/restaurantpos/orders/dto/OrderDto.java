@@ -50,6 +50,9 @@ public class OrderDto {
         private BigDecimal changeAmount;
         private List<ItemResponse> items;
         private int version;
+        private String receiptPrintStatus;
+        private Instant receiptPrintedAt;
+        private String receiptPrintError;
     }
 
     @Data

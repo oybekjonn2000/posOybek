@@ -7,8 +7,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * System user entity — supports all staff roles (admin, cashier, waiter, etc.)
@@ -26,6 +26,9 @@ public class User extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "kitchen_id")
     private com.restaurantpos.kitchen.entity.Kitchen kitchen;
+
+    @OneToMany(mappedBy = "employee", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private Set<EmployeeKitchen> employeeKitchens = new HashSet<>();
 
     @Column(name = "username", nullable = false, length = 100)
     private String username;
@@ -92,5 +95,30 @@ public class User extends BaseEntity {
     public void resetFailedAttempts() {
         this.failedLoginAttempts = 0;
         this.lockedUntil = null;
+    }
+
+    public com.restaurantpos.kitchen.entity.Kitchen getKitchen() {
+        if (employeeKitchens != null && !employeeKitchens.isEmpty()) {
+            return employeeKitchens.iterator().next().getKitchen();
+        }
+        return this.kitchen;
+    }
+
+    public Set<com.restaurantpos.kitchen.entity.Kitchen> getKitchens() {
+        if (employeeKitchens != null && !employeeKitchens.isEmpty()) {
+            return employeeKitchens.stream()
+                    .map(EmployeeKitchen::getKitchen)
+                    .collect(Collectors.toSet());
+        }
+        return this.kitchen != null ? Set.of(this.kitchen) : Collections.emptySet();
+    }
+
+    public List<UUID> getKitchenIds() {
+        if (employeeKitchens != null && !employeeKitchens.isEmpty()) {
+            return employeeKitchens.stream()
+                    .map(ek -> ek.getKitchen().getId())
+                    .collect(Collectors.toList());
+        }
+        return this.kitchen != null ? List.of(this.kitchen.getId()) : Collections.emptyList();
     }
 }

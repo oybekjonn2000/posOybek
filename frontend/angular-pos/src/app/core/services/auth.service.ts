@@ -100,10 +100,12 @@ export class AuthService {
   }
 
   hasPermission(permission: string): boolean {
+    if (this.isAdmin()) return true;
     return this.permissions().has(permission);
   }
 
   hasAnyPermission(perms: string[]): boolean {
+    if (this.isAdmin()) return true;
     return perms.some(p => this.permissions().has(p));
   }
 
