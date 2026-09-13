@@ -188,8 +188,12 @@ export class SettingsService {
     return this.http.get<ApiResponse<SystemInfoDto>>(`${this.API}/system/info`);
   }
 
-  getAuditLogs(limit: number = 20): Observable<ApiResponse<AuditLogEntry[]>> {
-    return this.http.get<ApiResponse<AuditLogEntry[]>>(`${this.API}/audit-logs?limit=${limit}`);
+  getAuditLogs(limit: number = 20, page?: number, size?: number): Observable<ApiResponse<AuditLogEntry[]>> {
+    let url = `${this.API}/audit-logs?limit=${limit}`;
+    if (page !== undefined && size !== undefined) {
+      url += `&page=${page}&size=${size}`;
+    }
+    return this.http.get<ApiResponse<AuditLogEntry[]>>(url);
   }
 
   triggerBackup(): Observable<ApiResponse<string>> {

@@ -1,5 +1,10 @@
 package com.restaurantpos.orders.dto;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -66,6 +71,7 @@ public class OrderDto {
         private String kitchenName;
         private String productName;
         private String productSku;
+        private String imageUrl;
         private BigDecimal quantity;
         private BigDecimal unitPrice;
         private BigDecimal discountAmount;
@@ -105,7 +111,7 @@ public class OrderDto {
         private int guestCount = 1;
         private String notes;
         private String kitchenNotes;
-        private List<ItemRequest> items;
+        private List<@Valid ItemRequest> items;
     }
 
     @Data
@@ -114,10 +120,14 @@ public class OrderDto {
     public static class ItemRequest {
         @NotNull(message = "Product ID is required")
         private UUID productId;
+
         @NotNull(message = "Quantity is required")
+        @DecimalMin(value = "0.001", message = "Quantity must be greater than 0")
+        @DecimalMax(value = "9999", message = "Quantity exceeds maximum allowed limit")
         private BigDecimal quantity = BigDecimal.ONE;
+
         private String notes;
-        private List<ModifierRequest> modifiers;
+        private List<@Valid ModifierRequest> modifiers;
     }
 
     @Data
@@ -126,6 +136,9 @@ public class OrderDto {
     public static class ModifierRequest {
         @NotNull(message = "Modifier ID is required")
         private UUID modifierId;
+
+        @Min(value = 1, message = "Modifier quantity must be at least 1")
+        @Max(value = 100, message = "Modifier quantity exceeds limit")
         private int quantity = 1;
     }
 
@@ -134,7 +147,7 @@ public class OrderDto {
     @AllArgsConstructor
     public static class AddItemsRequest {
         @NotEmpty(message = "Items list cannot be empty")
-        private List<ItemRequest> items;
+        private List<@Valid ItemRequest> items;
     }
 
     @Data
@@ -156,7 +169,11 @@ public class OrderDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ApplyDiscountRequest {
+        @DecimalMin(value = "0.0", message = "Discount percent must be non-negative")
+        @DecimalMax(value = "100.0", message = "Discount percent cannot exceed 100")
         private BigDecimal percent;
+
+        @DecimalMin(value = "0.0", message = "Discount amount must be non-negative")
         private BigDecimal amount;
     }
 

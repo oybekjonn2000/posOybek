@@ -28,9 +28,19 @@ export interface UserInfo {
   permissions: string[];
 }
 
+export interface PageMeta {
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data: T;
+  page?: PageMeta;
   message: string | null;
   errorCode: string | null;
   timestamp: string;

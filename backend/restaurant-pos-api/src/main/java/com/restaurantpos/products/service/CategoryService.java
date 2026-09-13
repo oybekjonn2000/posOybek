@@ -48,6 +48,18 @@ public class CategoryService {
     }
 
     @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<CategoryDto.Response> getCategoriesPaginated(
+            UUID tenantId, boolean activeOnly, UUID kitchenId, org.springframework.data.domain.Pageable pageable) {
+        List<CategoryDto.Response> list = getAllCategories(tenantId, activeOnly, kitchenId);
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), list.size());
+        List<CategoryDto.Response> content = (start <= end && start < list.size())
+                ? list.subList(start, end)
+                : java.util.Collections.emptyList();
+        return new org.springframework.data.domain.PageImpl<>(content, pageable, list.size());
+    }
+
+    @Transactional(readOnly = true)
     public CategoryDto.Response getCategoryById(UUID id, UUID tenantId) {
         Category category = categoryRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Category not found: " + id));
@@ -69,6 +81,10 @@ public class CategoryService {
 
         Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
                 .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi: " + request.getKitchenId()));
+
+        if (!kitchen.isActive()) {
+            throw PosException.badRequest("Faol bo'lmagan (INACTIVE) oshxonaga kategoriya biriktirib bo'lmaydi: " + kitchen.getName());
+        }
 
         Category parent = null;
         if (request.getParentId() != null) {
@@ -103,6 +119,9 @@ public class CategoryService {
         if (request.getKitchenId() != null) {
             Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getKitchenId(), tenantId)
                     .orElseThrow(() -> PosException.badRequest("Tanlangan oshxona topilmadi: " + request.getKitchenId()));
+            if (!kitchen.isActive()) {
+                throw PosException.badRequest("Faol bo'lmagan (INACTIVE) oshxonaga kategoriya biriktirib bo'lmaydi: " + kitchen.getName());
+            }
             category.setKitchen(kitchen);
         }
 

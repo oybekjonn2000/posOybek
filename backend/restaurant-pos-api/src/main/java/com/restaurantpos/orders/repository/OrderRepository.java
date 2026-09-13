@@ -2,6 +2,8 @@ package com.restaurantpos.orders.repository;
 
 import com.restaurantpos.orders.entity.Order;
 import org.springframework.data.jpa.repository.JpaRepository;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -19,6 +21,10 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     List<Order> findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(UUID tenantId, List<Order.OrderStatus> statuses);
 
     Optional<Order> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM Order o WHERE o.id = :id AND o.tenant.id = :tenantId AND o.deletedAt IS NULL")
+    Optional<Order> findByIdWithLock(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 
     Optional<Order> findByTenantIdAndOrderNumber(UUID tenantId, String orderNumber);
 
@@ -50,6 +56,28 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     default List<Order> findHistoryOrdersByWaiter(UUID tenantId, UUID waiterId) {
         return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES, waiterId);
+    }
+
+    org.springframework.data.domain.Page<Order> findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(
+            UUID tenantId, List<Order.OrderStatus> statuses, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<Order> findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(
+            UUID tenantId, List<Order.OrderStatus> statuses, UUID waiterId, org.springframework.data.domain.Pageable pageable);
+
+    default org.springframework.data.domain.Page<Order> findActiveOrders(UUID tenantId, org.springframework.data.domain.Pageable pageable) {
+        return findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, ACTIVE_STATUSES, pageable);
+    }
+
+    default org.springframework.data.domain.Page<Order> findActiveOrdersByWaiter(UUID tenantId, UUID waiterId, org.springframework.data.domain.Pageable pageable) {
+        return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, ACTIVE_STATUSES, waiterId, pageable);
+    }
+
+    default org.springframework.data.domain.Page<Order> findHistoryOrders(UUID tenantId, org.springframework.data.domain.Pageable pageable) {
+        return findByTenantIdAndStatusInAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES, pageable);
+    }
+
+    default org.springframework.data.domain.Page<Order> findHistoryOrdersByWaiter(UUID tenantId, UUID waiterId, org.springframework.data.domain.Pageable pageable) {
+        return findByTenantIdAndStatusInAndWaiterIdAndDeletedAtIsNullOrderByOpenedAtDesc(tenantId, HISTORY_STATUSES, waiterId, pageable);
     }
 
     List<Order> findByTenantIdAndStatusAndPaidAtBetweenAndDeletedAtIsNull(UUID tenantId, Order.OrderStatus status, Instant from, Instant to);

@@ -41,13 +41,13 @@ public class SecurityConfig {
             "/api/auth/login",
             "/api/auth/refresh",
             "/api/auth/device/register",
-            "/api/setup/**",
             "/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/actuator/health",
             "/actuator/info",
-            "/ws/**"
+            "/ws/**",
+            "/uploads/**"
     };
 
     @Bean
@@ -55,6 +55,14 @@ public class SecurityConfig {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.deny())
+                        .contentTypeOptions(contentType -> {})
+                        .referrerPolicy(referrer -> referrer.policy(
+                                org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:; frame-ancestors 'none';"))
+                )
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -96,7 +104,14 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        configuration.setAllowedOriginPatterns(List.of(
+                "http://localhost:4200",
+                "http://localhost:3000",
+                "http://127.0.0.1:4200",
+                "http://127.0.0.1:3000",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080"
+        ));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

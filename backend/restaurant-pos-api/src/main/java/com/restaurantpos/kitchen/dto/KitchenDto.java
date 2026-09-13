@@ -31,6 +31,10 @@ public class KitchenDto {
         private UUID printerId;
         private String printerName;
         private String printerStatus;
+        private int assignedEmployeesCount;
+        private int assignedCategoriesCount;
+        private Instant createdAt;
+        private Instant updatedAt;
     }
 
     @Data
@@ -38,17 +42,17 @@ public class KitchenDto {
     @AllArgsConstructor
     public static class CreateRequest {
         @NotBlank(message = "Oshxona nomi kiritilishi shart")
+        @jakarta.validation.constraints.Size(max = 100, message = "Oshxona nomi 100 belgidan oshmasligi kerak")
         private String name;
 
-        @NotBlank(message = "Oshxona kodi kiritilishi shart")
         private String code;
-
         private String description;
         private int sortOrder = 0;
-        private String color;
-        private Boolean autoPrint;
-        private Boolean soundNotification;
-        private Integer preparationTimeMinutes;
+        private Boolean active = true;
+        private String color = "#6366F1";
+        private Boolean autoPrint = true;
+        private Boolean soundNotification = true;
+        private Integer preparationTimeMinutes = 15;
         private UUID printerId;
     }
 
@@ -56,6 +60,7 @@ public class KitchenDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class UpdateRequest {
+        @jakarta.validation.constraints.Size(max = 100, message = "Oshxona nomi 100 belgidan oshmasligi kerak")
         private String name;
         private String code;
         private String description;
@@ -66,6 +71,13 @@ public class KitchenDto {
         private Boolean soundNotification;
         private Integer preparationTimeMinutes;
         private UUID printerId;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssignEmployeesRequest {
+        private List<UUID> employeeIds;
     }
 
     @Data

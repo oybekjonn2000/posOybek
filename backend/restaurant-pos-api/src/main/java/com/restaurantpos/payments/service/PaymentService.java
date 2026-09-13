@@ -54,11 +54,33 @@ public class PaymentService {
                 request.getOrderId(), cashierId, request.getAmount(), request.getPaymentMethod());
 
         try {
-            Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getOrderId(), tenantId)
+            Order order = orderRepository.findByIdWithLock(request.getOrderId(), tenantId)
                     .orElseThrow(() -> PosException.notFound("Order not found: " + request.getOrderId()));
 
             if (order.getStatus() == Order.OrderStatus.PAID) {
-                throw PosException.badRequest("Order is already paid");
+                throw PosException.badRequest("Buyurtma allaqachon to'langan");
+            }
+            if (order.getStatus() == Order.OrderStatus.CANCELLED) {
+                throw PosException.badRequest("Bekor qilingan buyurtmaga to'lov qabul qilinmaydi");
+            }
+            if (order.getStatus() == Order.OrderStatus.REFUNDED) {
+                throw PosException.badRequest("Qaytarilgan buyurtmaga to'lov qabul qilinmaydi");
+            }
+
+            if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                throw PosException.badRequest("To'lov summasi 0 dan katta bo'lishi kerak");
+            }
+            if (order.getTotal() != null && request.getAmount().compareTo(order.getTotal()) < 0) {
+                throw PosException.badRequest("To'lov summasi buyurtma umumiy summasidan kam bo'lishi mumkin emas. Kerakli summa: " + order.getTotal());
+            }
+            if (request.getCashAmount() != null && request.getCashAmount().compareTo(BigDecimal.ZERO) < 0) {
+                throw PosException.badRequest("Naqd to'lov summasi manfiy bo'lishi mumkin emas");
+            }
+            if (request.getCardAmount() != null && request.getCardAmount().compareTo(BigDecimal.ZERO) < 0) {
+                throw PosException.badRequest("Karta to'lov summasi manfiy bo'lishi mumkin emas");
+            }
+            if (request.getChangeAmount() != null && request.getChangeAmount().compareTo(BigDecimal.ZERO) < 0) {
+                throw PosException.badRequest("Qaytim summasi manfiy bo'lishi mumkin emas");
             }
 
             User cashier = userRepository.findById(cashierId).orElse(null);

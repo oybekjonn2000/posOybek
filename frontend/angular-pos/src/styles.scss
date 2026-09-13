@@ -619,3 +619,50 @@ body {
 
 /* Angular Material overrides */
 .mat-mdc-snack-bar-container { --mdc-snackbar-container-color: var(--bg-secondary); }
+
+/* Angular Material Paginator Theme Customization */
+.mat-mdc-paginator {
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border-top: 1px solid var(--border);
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+
+  .mat-mdc-paginator-container {
+    padding: 8px 16px !important;
+    min-height: 52px !important;
+    justify-content: flex-end;
+  }
+
+  .mat-mdc-paginator-page-size-label,
+  .mat-mdc-paginator-range-label {
+    color: var(--text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 500;
+  }
+
+  .mat-mdc-select-value {
+    color: var(--text-primary) !important;
+    font-weight: 600;
+  }
+
+  .mat-mdc-select-arrow svg {
+    fill: var(--text-secondary) !important;
+  }
+
+  .mat-mdc-icon-button {
+    color: var(--text-primary) !important;
+    transition: all 0.2s ease;
+
+    &:hover:not(:disabled) {
+      background: rgba(var(--primary-rgb), 0.15) !important;
+      color: var(--primary-light) !important;
+    }
+
+    &:disabled {
+      color: var(--text-muted) !important;
+      opacity: 0.4;
+    }
+  }
+}
+

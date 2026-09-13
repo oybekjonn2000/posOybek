@@ -1,14 +1,16 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { ProductService, Product, CreateProductRequest } from '../core/services/product.service';
 import { CategoryService, Category } from '../core/services/category.service';
 import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
+import { getProductImageUrl, handleImageError } from '../core/utils/product-image.util';
 
 @Component({
   selector: 'app-products',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="products-page fade-in">
       <!-- Page Header -->
@@ -27,6 +29,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               type="text"
               placeholder="Taom yoki SKU qidirish..."
               [(ngModel)]="searchQuery"
+              (ngModelChange)="onSearchChange()"
               class="pos-input"
             />
           </div>
@@ -63,14 +66,14 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         <button
           class="filter-chip filter-chip--sm"
           [class.active]="selectedCategoryId === null"
-          (click)="selectedCategoryId = null">
+          (click)="selectCategoryFilter(null)">
           Barcha bo'limlar
         </button>
         <button
           *ngFor="let cat of visibleCategories"
           class="filter-chip filter-chip--sm"
           [class.active]="selectedCategoryId === cat.id"
-          (click)="selectedCategoryId = cat.id">
+          (click)="selectCategoryFilter(cat.id)">
           {{ cat.name }} ({{ cat.productCount || getProductsCountForCategory(cat.id) }})
         </button>
       </div>
@@ -82,7 +85,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
           <p>Mahsulotlar yuklanmoqda...</p>
         </div>
 
-        <div *ngIf="!loading && filteredProducts.length === 0" class="empty-state">
+        <div *ngIf="!loading && totalItems === 0" class="empty-state">
           <div class="empty-icon">🍽️</div>
           <h3>Mahsulotlar topilmadi</h3>
           <p>Ushbu oshxona/kategoriya bo'yicha yoki qidiruv natijasida mahsulot yo'q.</p>
@@ -91,7 +94,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
           </button>
         </div>
 
-        <div *ngIf="filteredProducts.length > 0" class="table-responsive">
+        <div *ngIf="totalItems > 0" class="table-responsive">
           <table class="pos-table">
             <thead>
               <tr>
@@ -107,10 +110,20 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let p of filteredProducts">
+              <tr *ngFor="let p of pagedProducts">
                 <td>
                   <div class="product-title-cell">
-                    <span class="p-icon">{{ getProductEmoji(p.name, p.categoryName) }}</span>
+                    <div class="product-thumb-wrap">
+                      <img
+                        *ngIf="p.imageUrl"
+                        [src]="getImageUrl(p.imageUrl)"
+                        (error)="onImageError($event)"
+                        class="product-thumb"
+                        alt="Product"
+                        loading="lazy"
+                      />
+                      <span *ngIf="!p.imageUrl" class="p-icon">{{ getProductEmoji(p.name, p.categoryName) }}</span>
+                    </div>
                     <div>
                       <strong>{{ p.name }}</strong>
                       <div *ngIf="p.nameUz" class="sub-name">{{ p.nameUz }}</div>
@@ -155,6 +168,15 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            [length]="totalItems"
+            [pageSize]="pageSize"
+            [pageIndex]="pageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -242,6 +264,72 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
                 class="pos-input"
                 placeholder="Avtomatik yaratiladi"
               />
+            </div>
+
+            <!-- MAHSULOT RASMI -->
+            <div class="form-group full-width image-upload-group">
+              <label class="form-label">
+                Mahsulot rasmi
+                <span class="optional-hint">(Ixtiyoriy — JPG, JPEG, PNG, WEBP — maks 5 MB)</span>
+              </label>
+
+              <input
+                type="file"
+                #imageFileInput
+                (change)="onFileSelected($event)"
+                accept="image/jpeg,image/png,image/webp"
+                style="display: none;"
+              />
+
+              <!-- Preview card if image exists -->
+              <div *ngIf="imagePreview || formData.imageUrl" class="image-preview-card">
+                <div class="preview-img-container">
+                  <img
+                    [src]="imagePreview || getImageUrl(formData.imageUrl)"
+                    (error)="onImageError($event)"
+                    alt="Product preview"
+                    class="preview-img"
+                  />
+                  <div *ngIf="uploadingImage" class="preview-loading-overlay">
+                    <div class="mini-spinner"></div>
+                    <span>Yuklanmoqda...</span>
+                  </div>
+                </div>
+                <div class="preview-actions">
+                  <button
+                    type="button"
+                    class="pos-btn pos-btn--secondary pos-btn--sm"
+                    (click)="imageFileInput.click()"
+                    [disabled]="uploadingImage">
+                    🔄 Rasmni almashtirish
+                  </button>
+                  <button
+                    type="button"
+                    class="pos-btn pos-btn--danger pos-btn--sm"
+                    (click)="removeImage()"
+                    [disabled]="uploadingImage">
+                    🗑️ Rasmni o‘chirish
+                  </button>
+                </div>
+              </div>
+
+              <!-- Dropzone if no image -->
+              <div
+                *ngIf="!imagePreview && !formData.imageUrl"
+                class="image-dropzone"
+                (click)="imageFileInput.click()">
+                <div class="dropzone-icon">📷</div>
+                <div class="dropzone-title">Rasm yuklash uchun bosing</div>
+                <div class="dropzone-hint">JPG, JPEG, PNG yoki WEBP (maks 5 MB)</div>
+                <button type="button" class="pos-btn pos-btn--secondary pos-btn--sm" style="margin-top: 8px;">
+                  📁 Kompyuterdan tanlash
+                </button>
+              </div>
+
+              <!-- Validation Error -->
+              <div *ngIf="imageError" class="image-error-alert">
+                ⚠️ {{ imageError }}
+              </div>
             </div>
 
             <div class="form-group full-width checkbox-group">
@@ -621,6 +709,141 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
       color: var(--text-primary);
     }
 
+    .product-thumb-wrap {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .product-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .image-upload-group {
+      margin-top: 4px;
+    }
+
+    .optional-hint {
+      font-size: 11px;
+      font-weight: normal;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .image-preview-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px;
+      background: var(--bg-main);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      flex-wrap: wrap;
+    }
+
+    .preview-img-container {
+      position: relative;
+      width: 90px;
+      height: 90px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #111;
+      flex-shrink: 0;
+    }
+
+    .preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .preview-loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      color: white;
+      font-size: 11px;
+    }
+
+    .mini-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .preview-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .image-dropzone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 16px;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-main);
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s ease;
+
+      &:hover {
+        border-color: var(--primary);
+        background: rgba(var(--primary-rgb), 0.04);
+      }
+    }
+
+    .dropzone-icon {
+      font-size: 30px;
+      margin-bottom: 6px;
+    }
+
+    .dropzone-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .dropzone-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .image-error-alert {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      font-size: 12px;
+      color: #ef4444;
+      font-weight: 600;
+    }
+
     .modal-footer {
       display: flex;
       justify-content: flex-end;
@@ -667,6 +890,9 @@ export class ProductsComponent implements OnInit {
   isEditing = false;
   editingId: string | null = null;
   saving = false;
+  imagePreview: string | null = null;
+  uploadingImage = false;
+  imageError: string | null = null;
 
   formData: CreateProductRequest = {
     name: '',
@@ -675,7 +901,9 @@ export class ProductsComponent implements OnInit {
     unit: 'dona',
     salePrice: 0,
     purchasePrice: 0,
-    available: true
+    active: true,
+    available: true,
+    imageUrl: ''
   };
 
   constructor(
@@ -710,6 +938,9 @@ export class ProductsComponent implements OnInit {
         this.productService.getProducts().subscribe({
           next: (prodRes) => {
             this.products = prodRes.data || [];
+            if (this.pageIndex > 0 && this.pageIndex * this.pageSize >= this.totalItems) {
+              this.pageIndex = Math.max(0, Math.floor((this.totalItems - 1) / this.pageSize));
+            }
             this.loading = false;
             this.cdr.markForCheck();
           },
@@ -728,8 +959,23 @@ export class ProductsComponent implements OnInit {
     });
   }
 
+  pageIndex = 0;
+  pageSize = 10;
+  pageSizeOptions = [10, 25, 50, 100];
+
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+    this.cdr.markForCheck();
+  }
+
+  onSearchChange(): void {
+    this.pageIndex = 0;
+  }
+
   selectKitchenFilter(kitchenId: string | null): void {
     this.selectedKitchenId = kitchenId;
+    this.pageIndex = 0;
     // If current category does not belong to the selected kitchen, reset category filter
     if (kitchenId && this.selectedCategoryId) {
       const cat = this.categories.find(c => c.id === this.selectedCategoryId);
@@ -739,6 +985,11 @@ export class ProductsComponent implements OnInit {
     }
   }
 
+  selectCategoryFilter(categoryId: string | null): void {
+    this.selectedCategoryId = categoryId;
+    this.pageIndex = 0;
+  }
+
   get visibleCategories(): Category[] {
     if (!this.selectedKitchenId) {
       return this.categories;
@@ -746,7 +997,7 @@ export class ProductsComponent implements OnInit {
     return this.categories.filter(c => c.kitchenId === this.selectedKitchenId);
   }
 
-  get filteredProducts(): Product[] {
+  get allFilteredProducts(): Product[] {
     return this.products.filter(p => {
       // 1. Filter by kitchen (derived via category or product.kitchenId)
       if (this.selectedKitchenId) {
@@ -769,6 +1020,19 @@ export class ProductsComponent implements OnInit {
       }
       return true;
     });
+  }
+
+  get totalItems(): number {
+    return this.allFilteredProducts.length;
+  }
+
+  get pagedProducts(): Product[] {
+    const start = this.pageIndex * this.pageSize;
+    return this.allFilteredProducts.slice(start, start + this.pageSize);
+  }
+
+  get filteredProducts(): Product[] {
+    return this.pagedProducts;
   }
 
   getProductsCountForKitchen(kitchenId: string): number {
@@ -846,6 +1110,9 @@ export class ProductsComponent implements OnInit {
   openCreateModal(): void {
     this.isEditing = false;
     this.editingId = null;
+    this.imagePreview = null;
+    this.imageError = null;
+    this.uploadingImage = false;
 
     const defaultCatId = this.selectedCategoryId || (this.categories.length > 0 ? this.categories[0].id : '');
 
@@ -856,7 +1123,9 @@ export class ProductsComponent implements OnInit {
       unit: 'dona',
       salePrice: 0,
       purchasePrice: 0,
-      available: true
+      active: true,
+      available: true,
+      imageUrl: ''
     };
     this.showModal = true;
   }
@@ -864,6 +1133,9 @@ export class ProductsComponent implements OnInit {
   openEditModal(p: Product): void {
     this.isEditing = true;
     this.editingId = p.id;
+    this.imagePreview = null;
+    this.imageError = null;
+    this.uploadingImage = false;
 
     this.formData = {
       name: p.name,
@@ -872,9 +1144,75 @@ export class ProductsComponent implements OnInit {
       unit: p.unit || 'dona',
       salePrice: p.salePrice || p.price || 0,
       purchasePrice: p.purchasePrice || 0,
-      available: p.available !== false
+      active: p.active !== false,
+      available: p.available !== false,
+      imageUrl: p.imageUrl || ''
     };
     this.showModal = true;
+  }
+
+  onFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    this.imageError = null;
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    if (!allowedExts.includes(ext) || (file.type && !allowedTypes.includes(file.type.toLowerCase()))) {
+      this.imageError = 'Faqat JPG, JPEG, PNG yoki WEBP formatidagi rasm yuklash mumkin.';
+      input.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      this.imageError = 'Rasm hajmi 5 MB dan oshmasligi kerak.';
+      input.value = '';
+      return;
+    }
+
+    // Local instant preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      this.imagePreview = e.target?.result as string;
+      this.cdr.markForCheck();
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to server
+    this.uploadingImage = true;
+    this.productService.uploadImage(file).subscribe({
+      next: (res) => {
+        this.uploadingImage = false;
+        if (res.success && res.data?.imageUrl) {
+          this.formData.imageUrl = res.data.imageUrl;
+        }
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.uploadingImage = false;
+        this.imageError = err.error?.message || 'Rasmni yuklashda xatolik yuz berdi';
+        this.imagePreview = null;
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
+  removeImage(): void {
+    this.imagePreview = null;
+    this.formData.imageUrl = '';
+    this.imageError = null;
+    this.cdr.markForCheck();
+  }
+
+  getImageUrl(url?: string | null): string {
+    return getProductImageUrl(url);
+  }
+
+  onImageError(event: Event): void {
+    handleImageError(event);
   }
 
   closeModal(): void {
@@ -891,6 +1229,7 @@ export class ProductsComponent implements OnInit {
       return;
     }
 
+    this.formData.active = this.formData.available !== false;
     this.saving = true;
     if (this.isEditing && this.editingId) {
       this.productService.updateProduct(this.editingId, this.formData).subscribe({
@@ -925,6 +1264,10 @@ export class ProductsComponent implements OnInit {
     }
     this.productService.deleteProduct(p.id).subscribe({
       next: () => {
+        this.products = this.products.filter(item => item.id !== p.id);
+        if (this.pageIndex > 0 && this.pageIndex * this.pageSize >= this.totalItems) {
+          this.pageIndex = Math.max(0, this.pageIndex - 1);
+        }
         this.loadCategoriesAndProducts();
       },
       error: (err) => alert('O‘chirishda xatolik: ' + (err.error?.message || err.message))

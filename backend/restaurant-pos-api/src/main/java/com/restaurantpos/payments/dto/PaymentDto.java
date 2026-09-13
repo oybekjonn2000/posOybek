@@ -1,5 +1,6 @@
 package com.restaurantpos.payments.dto;
 
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -47,11 +48,18 @@ public class PaymentDto {
         private String paymentMethod; // CASH, CARD, OTHER, MIXED
 
         @NotNull(message = "Amount is required")
+        @DecimalMin(value = "0.01", message = "To'lov summasi 0 dan katta bo'lishi kerak")
         private BigDecimal amount;
 
+        @DecimalMin(value = "0.0", message = "Naqd summa manfiy bo'lishi mumkin emas")
         private BigDecimal cashAmount = BigDecimal.ZERO;
+
+        @DecimalMin(value = "0.0", message = "Karta summasi manfiy bo'lishi mumkin emas")
         private BigDecimal cardAmount = BigDecimal.ZERO;
+
+        @DecimalMin(value = "0.0", message = "Qaytim summasi manfiy bo'lishi mumkin emas")
         private BigDecimal changeAmount = BigDecimal.ZERO;
+
         private String referenceNumber;
         private String notes;
     }

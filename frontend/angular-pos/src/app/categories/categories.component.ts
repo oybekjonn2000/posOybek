@@ -1,13 +1,14 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { CategoryService, Category, CreateCategoryRequest } from '../core/services/category.service';
 import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
 
 @Component({
   selector: 'app-categories',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="categories-page fade-in">
       <!-- Header -->
@@ -22,12 +23,26 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         </button>
       </div>
 
+      <!-- Search & Kitchen Filter Tabs -->
+      <div class="filter-strip" style="display: flex; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; align-items: center;">
+        <div class="search-box" style="flex: 1; max-width: 320px;">
+          <input
+            type="text"
+            placeholder="Kategoriyani qidirish..."
+            [(ngModel)]="searchQuery"
+            (ngModelChange)="pageIndex = 0"
+            class="pos-input"
+            style="width: 100%;"
+          />
+        </div>
+      </div>
+
       <!-- Kitchen Filter Tabs -->
       <div class="kitchen-filter-tabs">
         <button
           class="kitchen-tab-btn"
           [class.active]="selectedKitchenFilter === null"
-          (click)="selectedKitchenFilter = null">
+          (click)="selectedKitchenFilter = null; pageIndex = 0">
           <span>🍽️ Barcha Oshxonalar</span>
           <span class="count-badge">{{ categories.length }}</span>
         </button>
@@ -35,7 +50,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
           *ngFor="let k of kitchens"
           class="kitchen-tab-btn"
           [class.active]="selectedKitchenFilter === k.id"
-          (click)="selectedKitchenFilter = k.id">
+          (click)="selectedKitchenFilter = k.id; pageIndex = 0">
           <span>{{ getKitchenEmoji(k.code) }} {{ k.name }}</span>
           <span class="count-badge">{{ getCategoriesCountForKitchen(k.id) }}</span>
         </button>
@@ -51,14 +66,14 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         <div *ngIf="!loading && filteredCategories.length === 0" class="empty-state">
           <div class="empty-icon">📁</div>
           <h3>Kategoriyalar mavjud emas</h3>
-          <p>Ushbu oshxona uchun hali kategoriya yaratilmagan.</p>
+          <p>Ushbu filtr bo'yicha kategoriya topilmadi.</p>
           <button class="pos-btn pos-btn--primary" (click)="openCreateModal()" style="margin-top: 12px;">
             Yangi kategoriya yaratish
           </button>
         </div>
 
         <div *ngIf="filteredCategories.length > 0" class="category-grid">
-          <div *ngFor="let cat of filteredCategories" class="category-card">
+          <div *ngFor="let cat of pagedCategories" class="category-card">
             <div class="card-top">
               <div class="color-badge" [style.background-color]="cat.color || '#6366f1'"></div>
               <div class="cat-details">
@@ -88,6 +103,16 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
             </div>
           </div>
         </div>
+
+        <mat-paginator
+          *ngIf="filteredCategories.length > 0"
+          [length]="filteredCategories.length"
+          [pageSize]="pageSize"
+          [pageIndex]="pageIndex"
+          [pageSizeOptions]="pageSizeOptions"
+          [showFirstLastButtons]="true"
+          (page)="onPageChange($event)">
+        </mat-paginator>
       </div>
 
       <!-- ============================================================ -->
@@ -113,7 +138,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
                 (change)="onKitchenSelected()"
                 required>
                 <option [ngValue]="''" disabled selected>Oshxonani tanlang ▼</option>
-                <option *ngFor="let k of kitchens" [value]="k.id">
+                <option *ngFor="let k of activeKitchensForModal" [value]="k.id">
                   {{ getKitchenEmoji(k.code) }} {{ k.name }} ({{ k.code }})
                 </option>
               </select>
@@ -567,6 +592,10 @@ export class CategoriesComponent implements OnInit {
     this.loadData();
   }
 
+  get activeKitchensForModal(): KitchenStation[] {
+    return this.kitchens.filter(k => k.active !== false || (this.isEditing && k.id === this.formData.kitchenId));
+  }
+
   loadData(): void {
     this.loading = true;
     this.cdr.markForCheck();
@@ -599,11 +628,36 @@ export class CategoriesComponent implements OnInit {
     });
   }
 
+  // Search & Pagination
+  searchQuery = '';
+  pageIndex = 0;
+  pageSize = 10;
+  pageSizeOptions = [10, 25, 50, 100];
+
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+  }
+
   get filteredCategories(): Category[] {
-    if (!this.selectedKitchenFilter) {
-      return this.categories;
+    let result = this.categories;
+    if (this.selectedKitchenFilter) {
+      result = result.filter(c => c.kitchenId === this.selectedKitchenFilter);
     }
-    return this.categories.filter(c => c.kitchenId === this.selectedKitchenFilter);
+    if (this.searchQuery.trim()) {
+      const q = this.searchQuery.toLowerCase();
+      result = result.filter(c => c.name.toLowerCase().includes(q));
+    }
+    return result;
+  }
+
+  get pagedCategories(): Category[] {
+    const list = this.filteredCategories;
+    if (this.pageIndex * this.pageSize >= list.length && list.length > 0) {
+      this.pageIndex = Math.max(0, Math.ceil(list.length / this.pageSize) - 1);
+    }
+    const start = this.pageIndex * this.pageSize;
+    return list.slice(start, start + this.pageSize);
   }
 
   getCategoriesCountForKitchen(kitchenId: string): number {

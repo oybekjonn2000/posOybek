@@ -2,6 +2,7 @@ import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { OrderService, Order, OrderItem, CancellationReceipt } from '../../core/services/order.service';
 import { PaymentService, PaymentProcessRequest } from '../../core/services/payment.service';
 import { TableService, RestaurantTable } from '../../core/services/table.service';
@@ -11,7 +12,7 @@ import { PrinterService } from '../../core/services/printer.service';
 @Component({
   selector: 'app-orders-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule, MatPaginatorModule],
   template: `
     <div class="orders-page fade-in">
       <!-- Top Bar -->
@@ -28,6 +29,7 @@ import { PrinterService } from '../../core/services/printer.service';
               type="text"
               placeholder="Qidiruv (Stol, #raqam, ofitsiant)..."
               [(ngModel)]="searchQuery"
+              (ngModelChange)="pageIndex = 0"
               class="pos-input"
             />
           </div>
@@ -78,9 +80,24 @@ import { PrinterService } from '../../core/services/printer.service';
           </button>
         </div>
 
-        <div class="revenue-pill" *ngIf="todayTotalRevenue > 0">
-          <span>Bugungi tushum:</span>
-          <strong>{{ todayTotalRevenue | number:'1.0-0' }} so'm</strong>
+        <div class="revenue-badges-group">
+          <!-- Active orders sum if on active tab -->
+          <div class="revenue-pill active-pill" *ngIf="activeTab !== 'PAID' && activeOrdersTotalSum > 0">
+            <span>Faol buyurtmalar:</span>
+            <strong>{{ activeOrdersTotalSum | number:'1.0-0' }} so'm</strong>
+          </div>
+
+          <!-- Filtered period revenue if on PAID tab and not TODAY -->
+          <div class="revenue-pill period-pill" *ngIf="activeTab === 'PAID' && dateFilter !== 'TODAY' && historyOrdersTotalSum > 0">
+            <span>{{ getDateFilterLabel() }} tushum:</span>
+            <strong>{{ historyOrdersTotalSum | number:'1.0-0' }} so'm</strong>
+          </div>
+
+          <!-- Today's Revenue -->
+          <div class="revenue-pill" *ngIf="todayTotalRevenue > 0">
+            <span>Bugungi tushum:</span>
+            <strong>{{ todayTotalRevenue | number:'1.0-0' }} so'm</strong>
+          </div>
         </div>
       </div>
 
@@ -89,26 +106,26 @@ import { PrinterService } from '../../core/services/printer.service';
         <div class="filter-group">
           <span class="filter-label">📅 Sana:</span>
           <div class="pill-group">
-            <button class="pill-btn" [class.active]="dateFilter === 'ALL'" (click)="dateFilter = 'ALL'">Barchasi</button>
-            <button class="pill-btn" [class.active]="dateFilter === 'TODAY'" (click)="dateFilter = 'TODAY'">Bugun</button>
-            <button class="pill-btn" [class.active]="dateFilter === 'YESTERDAY'" (click)="dateFilter = 'YESTERDAY'">Kecha</button>
-            <button class="pill-btn" [class.active]="dateFilter === 'THIS_WEEK'" (click)="dateFilter = 'THIS_WEEK'">Shu hafta</button>
-            <button class="pill-btn" [class.active]="dateFilter === 'THIS_MONTH'" (click)="dateFilter = 'THIS_MONTH'">Shu oy</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'ALL'" (click)="dateFilter = 'ALL'; pageIndex = 0">Barchasi</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'TODAY'" (click)="dateFilter = 'TODAY'; pageIndex = 0">Bugun</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'YESTERDAY'" (click)="dateFilter = 'YESTERDAY'; pageIndex = 0">Kecha</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'THIS_WEEK'" (click)="dateFilter = 'THIS_WEEK'; pageIndex = 0">Shu hafta</button>
+            <button class="pill-btn" [class.active]="dateFilter === 'THIS_MONTH'" (click)="dateFilter = 'THIS_MONTH'; pageIndex = 0">Shu oy</button>
           </div>
         </div>
 
         <div class="filter-group">
           <span class="filter-label">💳 To'lov turi:</span>
           <div class="pill-group">
-            <button class="pill-btn" [class.active]="paymentMethodFilter === 'ALL'" (click)="paymentMethodFilter = 'ALL'">Barchasi</button>
-            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CASH'" (click)="paymentMethodFilter = 'CASH'">💵 Naqd</button>
-            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CARD'" (click)="paymentMethodFilter = 'CARD'">💳 Karta</button>
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'ALL'" (click)="paymentMethodFilter = 'ALL'; pageIndex = 0">Barchasi</button>
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CASH'" (click)="paymentMethodFilter = 'CASH'; pageIndex = 0">💵 Naqd</button>
+            <button class="pill-btn" [class.active]="paymentMethodFilter === 'CARD'" (click)="paymentMethodFilter = 'CARD'; pageIndex = 0">💳 Karta</button>
           </div>
         </div>
 
         <div class="filter-group" *ngIf="tablesList.length > 0">
           <span class="filter-label">🪑 Stol:</span>
-          <select [(ngModel)]="selectedTableFilter" class="pos-input pos-select-sm">
+          <select [(ngModel)]="selectedTableFilter" (ngModelChange)="pageIndex = 0" class="pos-input pos-select-sm">
             <option value="ALL">Barcha stollar</option>
             <option *ngFor="let t of tablesList" [value]="t.id">{{ t.name }} (#{{ t.tableNumber }})</option>
           </select>
@@ -156,7 +173,7 @@ import { PrinterService } from '../../core/services/printer.service';
             <tbody>
               <!-- Active Orders Rows -->
               <ng-container *ngIf="activeTab !== 'PAID'">
-                <tr *ngFor="let order of filteredOrders" class="order-row">
+                <tr *ngFor="let order of pagedOrders" class="order-row">
                   <td class="order-num-col">
                     <strong>#{{ order.orderNumber }}</strong>
                   </td>
@@ -222,7 +239,7 @@ import { PrinterService } from '../../core/services/printer.service';
 
               <!-- Paid History Orders Rows -->
               <ng-container *ngIf="activeTab === 'PAID'">
-                <tr *ngFor="let order of filteredOrders" class="order-row order-row--history">
+                <tr *ngFor="let order of pagedOrders" class="order-row order-row--history">
                   <td class="order-num-col">
                     <strong class="history-order-num">#{{ order.orderNumber }}</strong>
                   </td>
@@ -282,8 +299,102 @@ import { PrinterService } from '../../core/services/printer.service';
                 </tr>
               </ng-container>
             </tbody>
+
+            <!-- Table Footer Totals -->
+            <tfoot *ngIf="filteredOrders.length > 0">
+              <!-- Active Orders Footer Row -->
+              <tr *ngIf="activeTab !== 'PAID'" class="tfoot-row">
+                <td colspan="4" class="tfoot-label">
+                  <span class="tfoot-badge">JAMI FAOL:</span>
+                  <strong>{{ filteredOrders.length }} ta buyurtma</strong>
+                  <span class="tfoot-sub">({{ activeOrdersTotalItemsCount }} xil taom)</span>
+                </td>
+                <td class="tfoot-amount">
+                  <strong class="tfoot-amount-val">{{ activeOrdersTotalSum | number:'1.0-0' }} so'm</strong>
+                </td>
+                <td colspan="3" class="tfoot-info-cell">
+                  <span class="tfoot-info">Ushbu sahifada: {{ pagedOrders.length }} ta</span>
+                </td>
+              </tr>
+
+              <!-- History Orders Footer Row -->
+              <tr *ngIf="activeTab === 'PAID'" class="tfoot-row tfoot-row--history">
+                <td colspan="4" class="tfoot-label">
+                  <span class="tfoot-badge tfoot-badge--green">JAMI TUSHUM:</span>
+                  <strong>{{ filteredOrders.length }} ta buyurtma</strong>
+                  <span class="tfoot-sub">({{ getDateFilterLabel() }})</span>
+                </td>
+                <td class="tfoot-amount">
+                  <strong class="tfoot-amount-val tfoot-amount-val--green">
+                    {{ historyOrdersTotalSum | number:'1.0-0' }} so'm
+                  </strong>
+                </td>
+                <td class="tfoot-payment">
+                  <div class="tfoot-paid-box">
+                    <span class="tfoot-paid-val">{{ historyOrdersPaidSum | number:'1.0-0' }} so'm</span>
+                    <div class="tfoot-breakdown">
+                      <span *ngIf="historyOrdersCashSum > 0" class="breakdown-cash">💵 {{ historyOrdersCashSum | number:'1.0-0' }}</span>
+                      <span *ngIf="historyOrdersCardSum > 0" class="breakdown-card">💳 {{ historyOrdersCardSum | number:'1.0-0' }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td colspan="3" class="tfoot-info-cell">
+                  <span class="tfoot-info">Ushbu sahifada: {{ pagedOrders.length }} ta</span>
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
+
+        <!-- Bottom Summary Bar (Both Active & Paid) -->
+        <div class="orders-summary-bar" *ngIf="filteredOrders.length > 0">
+          <div class="summary-left">
+            <div class="summary-stat-chip">
+              <span class="chip-label">{{ activeTab === 'PAID' ? '📁 Yopilgan buyurtmalar:' : '📋 Faol buyurtmalar:' }}</span>
+              <strong class="chip-value">{{ filteredOrders.length }} ta</strong>
+            </div>
+
+            <div class="summary-stat-chip" *ngIf="activeTab !== 'PAID'">
+              <span class="chip-label">🍽️ Taomlar soni:</span>
+              <strong class="chip-value">{{ activeOrdersTotalItemsCount }} xil</strong>
+            </div>
+
+            <div class="summary-stat-chip" *ngIf="activeTab === 'PAID' && historyOrdersCashSum > 0">
+              <span class="chip-label">💵 Naqd:</span>
+              <strong class="chip-value cash-text">{{ historyOrdersCashSum | number:'1.0-0' }} so'm</strong>
+            </div>
+
+            <div class="summary-stat-chip" *ngIf="activeTab === 'PAID' && historyOrdersCardSum > 0">
+              <span class="chip-label">💳 Karta:</span>
+              <strong class="chip-value card-text">{{ historyOrdersCardSum | number:'1.0-0' }} so'm</strong>
+            </div>
+          </div>
+
+          <div class="summary-right">
+            <div class="summary-total-box" [class.summary-total-box--green]="activeTab === 'PAID'">
+              <span class="total-caption">
+                {{ activeTab === 'PAID' ? 'JAMI TUSHUM SUMMASI:' : 'JAMI FAOL SUMMA:' }}
+              </span>
+              <span class="total-number">
+                {{ (activeTab === 'PAID' ? historyOrdersTotalSum : activeOrdersTotalSum) | number:'1.0-0' }} so'm
+              </span>
+              <span class="total-paid-sub" *ngIf="activeTab === 'PAID' && historyOrdersPaidSum !== historyOrdersTotalSum">
+                (To'langan: {{ historyOrdersPaidSum | number:'1.0-0' }} so'm)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Material Paginator -->
+        <mat-paginator
+          *ngIf="filteredOrders.length > 0"
+          [length]="filteredOrders.length"
+          [pageSize]="pageSize"
+          [pageIndex]="pageIndex"
+          [pageSizeOptions]="pageSizeOptions"
+          [showFirstLastButtons]="true"
+          (page)="onPageChange($event)">
+        </mat-paginator>
       </div>
 
       <!-- ============================================================ -->
@@ -902,6 +1013,13 @@ import { PrinterService } from '../../core/services/printer.service';
       }
     }
 
+    .revenue-badges-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     .revenue-pill {
       display: flex;
       align-items: center;
@@ -915,6 +1033,188 @@ import { PrinterService } from '../../core/services/printer.service';
 
       strong {
         font-size: 15px;
+      }
+
+      &.active-pill {
+        background: rgba(245, 158, 11, 0.15);
+        border-color: rgba(245, 158, 11, 0.35);
+        color: #f59e0b;
+      }
+
+      &.period-pill {
+        background: rgba(99, 102, 241, 0.15);
+        border-color: rgba(99, 102, 241, 0.35);
+        color: #818cf8;
+      }
+    }
+
+    /* Table Footer (tfoot) */
+    .tfoot-row {
+      background: rgba(30, 41, 59, 0.7);
+      border-top: 2px solid var(--border);
+
+      td {
+        padding: 12px 16px;
+        vertical-align: middle;
+      }
+
+      .tfoot-label {
+        color: var(--text-primary);
+        font-size: 13px;
+
+        strong {
+          color: var(--text-primary);
+          margin-left: 6px;
+        }
+      }
+
+      .tfoot-badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.4);
+
+        &--green {
+          background: rgba(16, 185, 129, 0.2);
+          color: #10b981;
+          border-color: rgba(16, 185, 129, 0.4);
+        }
+      }
+
+      .tfoot-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-left: 4px;
+      }
+
+      .tfoot-amount-val {
+        font-size: 15px;
+        font-weight: 800;
+        color: #f59e0b;
+
+        &--green {
+          color: #10b981;
+        }
+      }
+
+      .tfoot-paid-box {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .tfoot-paid-val {
+        font-size: 14px;
+        font-weight: 800;
+        color: #10b981;
+      }
+
+      .tfoot-breakdown {
+        display: flex;
+        gap: 8px;
+        font-size: 11px;
+
+        .breakdown-cash { color: #34d399; }
+        .breakdown-card { color: #60a5fa; }
+      }
+
+      .tfoot-info-cell {
+        text-align: right;
+      }
+
+      .tfoot-info {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+    }
+
+    /* Orders Summary Bar */
+    .orders-summary-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.9));
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      margin: 12px 16px;
+
+      .summary-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .summary-stat-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 5px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+
+        .chip-label {
+          color: var(--text-muted);
+        }
+
+        .chip-value {
+          color: var(--text-primary);
+          font-weight: 700;
+
+          &.cash-text { color: #34d399; }
+          &.card-text { color: #60a5fa; }
+        }
+      }
+
+      .summary-right {
+        display: flex;
+        align-items: center;
+      }
+
+      .summary-total-box {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        padding: 6px 16px;
+        border-radius: 8px;
+
+        &--green {
+          background: rgba(16, 185, 129, 0.12);
+          border-color: rgba(16, 185, 129, 0.35);
+
+          .total-caption { color: #10b981; }
+          .total-number { color: #10b981; }
+        }
+
+        .total-caption {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.8px;
+          color: #f59e0b;
+        }
+
+        .total-number {
+          font-size: 18px;
+          font-weight: 900;
+          color: #f59e0b;
+        }
+
+        .total-paid-sub {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
       }
     }
 
@@ -1807,8 +2107,13 @@ export class OrdersListComponent implements OnInit {
   searchQuery = '';
   activeTab: 'ALL' | 'ACTIVE' | 'KITCHEN' | 'READY' | 'PAID' = 'ALL';
 
+  // Pagination
+  pageIndex = 0;
+  pageSize = 10;
+  pageSizeOptions = [10, 25, 50, 100];
+
   // History filters
-  dateFilter: 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' = 'ALL';
+  dateFilter: 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' = 'TODAY';
   paymentMethodFilter: 'ALL' | 'CASH' | 'CARD' = 'ALL';
   selectedTableFilter: string = 'ALL';
 
@@ -1911,6 +2216,7 @@ export class OrdersListComponent implements OnInit {
 
   setTab(tab: 'ALL' | 'ACTIVE' | 'KITCHEN' | 'READY' | 'PAID'): void {
     this.activeTab = tab;
+    this.pageIndex = 0;
     if (tab === 'PAID') {
       this.loadHistoryOrders();
     }
@@ -1921,9 +2227,8 @@ export class OrdersListComponent implements OnInit {
       return this.historyOrders.filter(order => {
         // Date filter
         if (this.dateFilter !== 'ALL') {
-          const dateStr = order.closedAt || order.paidAt || order.openedAt || order.createdAt;
-          if (!dateStr) return false;
-          const orderDate = new Date(dateStr);
+          const orderDate = this.getOrderDate(order);
+          if (!orderDate) return false;
           const now = new Date();
 
           if (this.dateFilter === 'TODAY') {
@@ -2000,6 +2305,20 @@ export class OrdersListComponent implements OnInit {
     });
   }
 
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+  }
+
+  get pagedOrders(): Order[] {
+    const list = this.filteredOrders;
+    if (this.pageIndex * this.pageSize >= list.length && list.length > 0) {
+      this.pageIndex = Math.max(0, Math.ceil(list.length / this.pageSize) - 1);
+    }
+    const start = this.pageIndex * this.pageSize;
+    return list.slice(start, start + this.pageSize);
+  }
+
   get activeOrdersCount(): number {
     return this.orders.filter(o => o.status !== 'PAID' && o.status !== 'CANCELLED').length;
   }
@@ -2016,13 +2335,67 @@ export class OrdersListComponent implements OnInit {
     return this.historyOrders.length;
   }
 
+  getOrderDate(order: Order): Date | null {
+    const dStr = order.closedAt || order.paidAt || order.openedAt || order.createdAt;
+    if (!dStr) return null;
+    try {
+      return new Date(dStr);
+    } catch {
+      return null;
+    }
+  }
+
+  getDateFilterLabel(): string {
+    switch (this.dateFilter) {
+      case 'TODAY': return 'Bugungi';
+      case 'YESTERDAY': return 'Kechagi';
+      case 'THIS_WEEK': return 'Haftalik';
+      case 'THIS_MONTH': return 'Oylik';
+      case 'ALL': return 'Barcha davr';
+      default: return 'Davr';
+    }
+  }
+
+  get activeOrdersTotalSum(): number {
+    if (this.activeTab === 'PAID') return 0;
+    return this.filteredOrders.reduce((sum, o) => sum + (o.total || o.subtotal || 0), 0);
+  }
+
+  get activeOrdersTotalItemsCount(): number {
+    if (this.activeTab === 'PAID') return 0;
+    return this.filteredOrders.reduce((sum, o) => sum + (o.items ? o.items.length : 0), 0);
+  }
+
+  get historyOrdersTotalSum(): number {
+    if (this.activeTab !== 'PAID') return 0;
+    return this.filteredOrders.reduce((sum, o) => sum + (o.total || o.subtotal || 0), 0);
+  }
+
+  get historyOrdersPaidSum(): number {
+    if (this.activeTab !== 'PAID') return 0;
+    return this.filteredOrders.reduce((sum, o) => sum + (o.paidAmount != null ? o.paidAmount : (o.total || o.subtotal || 0)), 0);
+  }
+
+  get historyOrdersCashSum(): number {
+    if (this.activeTab !== 'PAID') return 0;
+    return this.filteredOrders
+      .filter(o => (o.paymentMethod || 'CASH').toUpperCase() === 'CASH')
+      .reduce((sum, o) => sum + (o.paidAmount != null ? o.paidAmount : (o.total || o.subtotal || 0)), 0);
+  }
+
+  get historyOrdersCardSum(): number {
+    if (this.activeTab !== 'PAID') return 0;
+    return this.filteredOrders
+      .filter(o => (o.paymentMethod || '').toUpperCase() === 'CARD')
+      .reduce((sum, o) => sum + (o.paidAmount != null ? o.paidAmount : (o.total || o.subtotal || 0)), 0);
+  }
+
   get todayTotalRevenue(): number {
     const now = new Date();
     return this.historyOrders
       .filter(o => {
-        const dStr = o.closedAt || o.paidAt || o.createdAt;
-        if (!dStr) return false;
-        const d = new Date(dStr);
+        const d = this.getOrderDate(o);
+        if (!d) return false;
         return d.getFullYear() === now.getFullYear() &&
                d.getMonth() === now.getMonth() &&
                d.getDate() === now.getDate();

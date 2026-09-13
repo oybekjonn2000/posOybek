@@ -6,7 +6,9 @@ E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\auth\secu
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\auth\security\UserPrincipal.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\auth\service\AuthService.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\config\JpaAuditingConfig.java
+E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\config\PaginationUtils.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\config\SecurityConfig.java
+E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\config\WebMvcConfig.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\entity\BaseEntity.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\exception\GlobalExceptionHandler.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\common\exception\PosException.java
@@ -85,6 +87,7 @@ E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\repository\ModifierRepository.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\repository\ProductRepository.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\service\CategoryService.java
+E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\service\ProductImageService.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\products\service\ProductService.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\reports\controller\ReportsController.java
 E:\posOybek\backend\restaurant-pos-api\src\main\java\com\restaurantpos\reports\dto\ReportDto.java

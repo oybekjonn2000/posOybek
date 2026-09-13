@@ -10,11 +10,13 @@ import { OrderService, CreateOrderRequest, CreateOrderItemRequest, Order } from 
 import { PaymentService } from '../../core/services/payment.service';
 import { NotificationService } from '../../core/services/notification.service';
 import { AuthService } from '../../core/services/auth.service';
+import { getProductImageUrl, handleImageError } from '../../core/utils/product-image.util';
 
 export interface PosCartItem {
   id?: string;
   productId: string;
   productName: string;
+  imageUrl?: string;
   unitPrice: number;
   quantity: number;
   sentQuantity: number;
@@ -97,15 +99,27 @@ export interface PosCartItem {
             <div class="products-grid">
               @for (prod of filteredProducts(); track prod.id) {
                 <div class="product-card" (click)="addToCart(prod)">
-                  <div class="product-card__content">
+                  <div class="product-card__image-box">
+                    <img
+                      [src]="getImageUrl(prod.imageUrl)"
+                      (error)="onImageError($event)"
+                      [alt]="prod.name"
+                      class="product-card__img"
+                      loading="lazy"
+                    />
                     <div class="product-card__station-badge">
                       {{ getProductStationBadge(prod) }}
                     </div>
-                    <div class="product-card__name">{{ prod.name }}</div>
-                    <div class="product-card__sku">{{ prod.unit }}</div>
-                    <div class="product-card__price">{{ formatPrice(prod.salePrice || prod.price || 0) }}</div>
                   </div>
-                  <button class="product-card__add">➕</button>
+                  <div class="product-card__body">
+                    <div class="product-card__name" [title]="prod.name">{{ prod.name }}</div>
+                    <div class="product-card__bottom-row">
+                      <div class="product-card__price">{{ formatPrice(prod.salePrice || prod.price || 0) }}</div>
+                      <button class="product-card__add" (click)="$event.stopPropagation(); addToCart(prod)" title="Buyurtmaga qo'shish">
+                        ➕
+                      </button>
+                    </div>
+                  </div>
                 </div>
               }
             </div>
@@ -138,56 +152,70 @@ export interface PosCartItem {
           } @else {
             @for (item of cart(); track getItemTrackKey(item, $index)) {
               <div class="cart-item" [class.cart-item--new]="item.isNew" [class.cart-item--voided]="item.voided">
-                <!-- 1. Top Row: Title + Total Subtotal -->
-                <div class="cart-item__top">
-                  <div class="cart-item__title">
-                    <span>{{ item.productName }}</span>
-                    @if (item.kitchenName) {
-                      <span class="kitchen-tag">({{ item.kitchenName }})</span>
-                    }
+                <div class="cart-item__main">
+                  <div class="cart-item__thumb-wrap">
+                    <img
+                      [src]="getImageUrl(item.imageUrl)"
+                      (error)="onImageError($event)"
+                      [alt]="item.productName"
+                      class="cart-item__thumb"
+                      loading="lazy"
+                    />
                   </div>
-                  <div class="cart-item__subtotal" [style.text-decoration]="item.voided ? 'line-through' : 'none'" [style.opacity]="item.voided ? '0.6' : '1'">
-                    {{ formatPrice(item.unitPrice * item.quantity) }}
-                  </div>
-                </div>
 
-                <!-- 2. Meta Row: Unit Price + Status Pill -->
-                <div class="cart-item__meta-row">
-                  <span class="cart-item__unit-price">{{ formatPrice(item.unitPrice) }}</span>
-                  <span class="status-pill" [class]="getStatusClass(item)">
-                    {{ getStatusLabel(item) }}
-                  </span>
-                  @if (item.voidReason) {
-                    <div class="void-reason-tag">⚠️ {{ item.voidReason }}</div>
-                  }
-                </div>
-
-                <!-- 3. Bottom Row: Stepper & Action button -->
-                @if (!item.voided) {
-                  <div class="cart-item__bottom">
-                    <div class="cart-item__qty-controls">
-                      <button class="qty-btn" (click)="decrementQty(item)" title="Kamaytirish">−</button>
-                      <span class="qty-display">{{ item.quantity }}x</span>
-                      <button class="qty-btn" (click)="incrementQty(item)" title="Oshirish">+</button>
+                  <div class="cart-item__content">
+                    <!-- 1. Top Row: Title + Total Subtotal -->
+                    <div class="cart-item__top">
+                      <div class="cart-item__title">
+                        <span>{{ item.productName }}</span>
+                        @if (item.kitchenName) {
+                          <span class="kitchen-tag">({{ item.kitchenName }})</span>
+                        }
+                      </div>
+                      <div class="cart-item__subtotal" [style.text-decoration]="item.voided ? 'line-through' : 'none'" [style.opacity]="item.voided ? '0.6' : '1'">
+                        {{ formatPrice(item.unitPrice * item.quantity) }}
+                      </div>
                     </div>
 
-                    <div class="cart-item__actions">
-                      @if ((item.sentQuantity || 0) === 0) {
-                        <button class="cart-item__remove" title="O'chirish" (click)="removeItem(item)">
-                          ✕ O'chirish
-                        </button>
-                      } @else if (currentOrderId()) {
-                        <button class="btn-cancel-item" (click)="openCancelModal(item)" title="Oshxonadagi taomni bekor qilish">
-                          🚫 Bekor qilish
-                        </button>
+                    <!-- 2. Meta Row: Unit Price + Status Pill -->
+                    <div class="cart-item__meta-row">
+                      <span class="cart-item__unit-price">{{ formatPrice(item.unitPrice) }}</span>
+                      <span class="status-pill" [class]="getStatusClass(item)">
+                        {{ getStatusLabel(item) }}
+                      </span>
+                      @if (item.voidReason) {
+                        <div class="void-reason-tag">⚠️ {{ item.voidReason }}</div>
                       }
                     </div>
+
+                    <!-- 3. Bottom Row: Stepper & Action button -->
+                    @if (!item.voided) {
+                      <div class="cart-item__bottom">
+                        <div class="cart-item__qty-controls">
+                          <button class="qty-btn" (click)="decrementQty(item)" title="Kamaytirish">−</button>
+                          <span class="qty-display">{{ item.quantity }}x</span>
+                          <button class="qty-btn" (click)="incrementQty(item)" title="Oshirish">+</button>
+                        </div>
+
+                        <div class="cart-item__actions">
+                          @if ((item.sentQuantity || 0) === 0) {
+                            <button class="cart-item__remove" title="O'chirish" (click)="removeItem(item)">
+                              ✕ O'chirish
+                            </button>
+                          } @else if (currentOrderId()) {
+                            <button class="btn-cancel-item" (click)="openCancelModal(item)" title="Oshxonadagi taomni bekor qilish">
+                              🚫 Bekor qilish
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    } @else {
+                      <div class="cart-item__voided-badge">
+                        <span>❌ Bekor qilingan ({{ item.quantity }} ta)</span>
+                      </div>
+                    }
                   </div>
-                } @else {
-                  <div class="cart-item__voided-badge">
-                    <span>❌ Bekor qilingan ({{ item.quantity }} ta)</span>
-                  </div>
-                }
+                </div>
               </div>
             }
           }
@@ -501,63 +529,105 @@ export interface PosCartItem {
     }
     .products-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 14px;
     }
     .product-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
-      padding: 16px;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
       cursor: pointer;
       position: relative;
-      transition: all var(--transition);
+      transition: all 0.2s ease;
 
       &:hover {
         transform: translateY(-2px);
         border-color: var(--primary);
-        box-shadow: var(--shadow-md);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+
+        .product-card__img {
+          transform: scale(1.04);
+        }
+      }
+
+      &__image-box {
+        position: relative;
+        width: 100%;
+        height: 120px;
+        background: #141721;
+        overflow: hidden;
+        border-bottom: 1px solid var(--border);
+      }
+
+      &__img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.3s ease;
       }
 
       &__station-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
         font-size: 11px;
         font-weight: 700;
-        color: var(--primary-light);
-        background: rgba(var(--primary-rgb), 0.08);
+        color: #fff;
+        background: rgba(15, 17, 23, 0.85);
+        backdrop-filter: blur(4px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        margin-bottom: 6px;
-        width: fit-content;
+        padding: 3px 8px;
+        border-radius: 6px;
+        z-index: 2;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      &__body {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        justify-content: space-between;
       }
 
       &__name {
         font-weight: 700;
-        font-size: 15px;
+        font-size: 14px;
         color: var(--text-primary);
-        margin-bottom: 4px;
+        margin-bottom: 8px;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-height: 36px;
       }
-      &__sku {
-        font-size: 12px;
-        color: var(--text-muted);
-        margin-bottom: 10px;
+
+      &__bottom-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: auto;
       }
+
       &__price {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 800;
         color: var(--primary-light);
       }
+
       &__add {
-        position: absolute;
-        bottom: 12px;
-        right: 12px;
-        background: var(--bg-main);
-        border: 1px solid var(--border);
+        background: rgba(var(--primary-rgb), 0.15);
+        color: var(--primary-light);
+        border: 1px solid rgba(var(--primary-rgb), 0.3);
         border-radius: 50%;
         width: 32px;
         height: 32px;
@@ -566,6 +636,14 @@ export interface PosCartItem {
         justify-content: center;
         font-size: 14px;
         cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          background: var(--primary);
+          color: white;
+          border-color: var(--primary);
+          transform: scale(1.1);
+        }
       }
     }
 
@@ -665,6 +743,37 @@ export interface PosCartItem {
         opacity: 0.6;
         background: rgba(239, 68, 68, 0.04);
         border-color: rgba(239, 68, 68, 0.3);
+      }
+
+      &__main {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      &__thumb-wrap {
+        width: 44px;
+        height: 44px;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #141721;
+        border: 1px solid var(--border);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      &__thumb {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      &__content {
+        flex: 1;
+        min-width: 0;
       }
 
       &__top {
@@ -1279,6 +1388,18 @@ export class PosComponent implements OnInit {
         if (res.success && res.data) {
           this.products.set(res.data);
           this.filterProducts();
+          // If cart has items without images, enrich them
+          this.cart.update(items =>
+            items.map(item => {
+              if (!item.imageUrl) {
+                const p = res.data.find(x => x.id === item.productId);
+                if (p?.imageUrl) {
+                  return { ...item, imageUrl: p.imageUrl };
+                }
+              }
+              return item;
+            })
+          );
         }
       },
       error: () => {
@@ -1365,12 +1486,17 @@ export class PosComponent implements OnInit {
       const key = isVoid ? `void_${it.id}` : `prod_${it.productId}`;
       const sentQty = it.sentQuantity ?? (it.kitchenStatus !== 'NEW' ? it.quantity : 0);
       const unitPrice = it.productPrice ?? it.unitPrice ?? 0;
+      const existingProduct = this.products().find(p => p.id === it.productId);
+      const itemImg = it.imageUrl || existingProduct?.imageUrl;
 
       if (!isVoid && mergedMap.has(key)) {
         const existing = mergedMap.get(key)!;
         existing.quantity += it.quantity;
         existing.sentQuantity = (existing.sentQuantity || 0) + sentQty;
         existing.subtotal = existing.quantity * existing.unitPrice;
+        if (!existing.imageUrl && itemImg) {
+          existing.imageUrl = itemImg;
+        }
         if (existing.sentQuantity >= existing.quantity) {
           existing.kitchenStatus = 'SENT_TO_KITCHEN';
         } else if (existing.sentQuantity > 0) {
@@ -1383,6 +1509,7 @@ export class PosComponent implements OnInit {
           id: it.id,
           productId: it.productId,
           productName: it.productName,
+          imageUrl: itemImg,
           unitPrice: unitPrice,
           quantity: it.quantity,
           sentQuantity: sentQty,
@@ -1465,6 +1592,7 @@ export class PosComponent implements OnInit {
       const newItem: PosCartItem = {
         productId: product.id,
         productName: product.name,
+        imageUrl: product.imageUrl,
         unitPrice: price,
         quantity: 1,
         sentQuantity: 0,
@@ -1477,6 +1605,14 @@ export class PosComponent implements OnInit {
       };
       this.cart.update(items => [...items, newItem]);
     }
+  }
+
+  getImageUrl(url?: string | null): string {
+    return getProductImageUrl(url);
+  }
+
+  onImageError(event: Event): void {
+    handleImageError(event);
   }
 
   incrementQty(item: PosCartItem): void {

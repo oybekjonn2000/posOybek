@@ -34,6 +34,8 @@ export interface CreateProductRequest {
   name: string;
   sku?: string;
   barcode?: string;
+  description?: string;
+  imageUrl?: string;
   unit?: string;
   purchasePrice?: number;
   salePrice: number;
@@ -47,10 +49,12 @@ export class ProductService {
 
   constructor(private http: HttpClient) {}
 
-  getProducts(categoryId?: string, query?: string, activeOnly: boolean = false): Observable<ApiResponse<Product[]>> {
+  getProducts(categoryId?: string, query?: string, activeOnly: boolean = false, page?: number, size?: number): Observable<ApiResponse<Product[]>> {
     let params = new HttpParams().set('activeOnly', activeOnly.toString());
     if (categoryId) params = params.set('categoryId', categoryId);
     if (query) params = params.set('query', query);
+    if (page !== undefined && page !== null) params = params.set('page', page.toString());
+    if (size !== undefined && size !== null) params = params.set('size', size.toString());
     return this.http.get<ApiResponse<Product[]>>(this.API, { params });
   }
 
@@ -66,7 +70,24 @@ export class ProductService {
     return this.http.put<ApiResponse<Product>>(`${this.API}/${id}`, request);
   }
 
+  uploadImage(file: File): Observable<ApiResponse<{ imageUrl: string }>> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<ApiResponse<{ imageUrl: string }>>(`${this.API}/upload-image`, formData);
+  }
+
+  uploadProductImageForId(id: string, file: File): Observable<ApiResponse<Product>> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<ApiResponse<Product>>(`${this.API}/${id}/image`, formData);
+  }
+
+  deleteProductImage(id: string): Observable<ApiResponse<Product>> {
+    return this.http.delete<ApiResponse<Product>>(`${this.API}/${id}/image`);
+  }
+
   deleteProduct(id: string): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(`${this.API}/${id}`);
   }
 }
+

@@ -241,8 +241,16 @@ public class InventoryService {
         InventoryItem item = itemRepository.findByIdAndTenantIdAndDeletedAtIsNull(itemId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Item not found: " + itemId));
 
+        if (req.getQuantity() == null) {
+            throw PosException.badRequest("Tuzatish miqdori kiritilishi shart");
+        }
+
         BigDecimal before = item.getQuantity() != null ? item.getQuantity() : BigDecimal.ZERO;
         BigDecimal after = before.add(req.getQuantity());
+
+        if (after.compareTo(BigDecimal.ZERO) < 0) {
+            throw PosException.badRequest("Ombor qoldig'i manfiy bo'lishi mumkin emas. (Joriy qoldiq: " + before + ", tuzatish: " + req.getQuantity() + ")");
+        }
 
         item.setQuantity(after);
         item.setUpdatedAt(Instant.now());
@@ -273,8 +281,17 @@ public class InventoryService {
         InventoryItem item = itemRepository.findByIdAndTenantIdAndDeletedAtIsNull(req.getItemId(), tenantId)
                 .orElseThrow(() -> PosException.notFound("Item not found: " + req.getItemId()));
 
+        if (req.getQuantity() == null || req.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+            throw PosException.badRequest("Chiqim miqdori 0 dan katta bo'lishi shart");
+        }
+
         BigDecimal qty = req.getQuantity().abs();
         BigDecimal before = item.getQuantity() != null ? item.getQuantity() : BigDecimal.ZERO;
+
+        if (before.compareTo(qty) < 0) {
+            throw PosException.badRequest("Omborda yetarli mahsulot yo'q. (Mavjud: " + before + " " + (item.getUnit() != null ? item.getUnit() : "") + ", so'ralgan: " + qty + ")");
+        }
+
         BigDecimal after = before.subtract(qty);
 
         item.setQuantity(after);

@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.web.multipart.MultipartFile;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -29,6 +31,7 @@ public class ProductService {
     private final TenantRepository tenantRepository;
     private final ModifierGroupRepository modifierGroupRepository;
     private final com.restaurantpos.kitchen.repository.KitchenRepository kitchenRepository;
+    private final ProductImageService productImageService;
 
     @Transactional(readOnly = true)
     public List<ProductDto.Response> getProducts(UUID tenantId, UUID categoryId, String query, boolean activeOnly) {
@@ -36,15 +39,31 @@ public class ProductService {
 
         if (query != null && !query.trim().isEmpty()) {
             products = productRepository.searchProducts(tenantId, query.trim());
+            if (activeOnly) {
+                products = products.stream()
+                        .filter(p -> p.isActive() && p.isAvailable())
+                        .collect(Collectors.toList());
+            }
         } else if (categoryId != null) {
-            products = productRepository.findByTenantIdAndCategoryIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId, categoryId);
+            products = activeOnly
+                    ? productRepository.findByTenantIdAndCategoryIdAndActiveTrueAndAvailableTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId, categoryId)
+                    : productRepository.findByTenantIdAndCategoryIdAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId, categoryId);
         } else if (activeOnly) {
-            products = productRepository.findByTenantIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId);
+            products = productRepository.findByTenantIdAndActiveTrueAndAvailableTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId);
         } else {
             products = productRepository.findByTenantIdAndDeletedAtIsNullOrderBySortOrderAscNameAsc(tenantId);
         }
 
         return products.stream().map(this::toResponse).collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<ProductDto.Response> getProductsPaginated(
+            UUID tenantId, UUID categoryId, String query, boolean activeOnly, org.springframework.data.domain.Pageable pageable) {
+        String cleanQuery = (query != null && !query.trim().isBlank()) ? query.trim() : null;
+        org.springframework.data.domain.Page<Product> page = productRepository.findProductsPaginated(
+                tenantId, categoryId, cleanQuery, activeOnly, pageable);
+        return page.map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
@@ -136,13 +155,30 @@ public class ProductService {
         if (request.getNameRu() != null) product.setNameRu(request.getNameRu());
         if (request.getNameEn() != null) product.setNameEn(request.getNameEn());
         if (request.getDescription() != null) product.setDescription(request.getDescription());
-        if (request.getImageUrl() != null) product.setImageUrl(request.getImageUrl());
+        if (request.getImageUrl() != null) {
+            String newUrl = request.getImageUrl().trim();
+            if (newUrl.isEmpty()) {
+                if (product.getImageUrl() != null) {
+                    productImageService.deleteProductImageFile(product.getImageUrl());
+                }
+                product.setImageUrl(null);
+            } else if (!newUrl.equals(product.getImageUrl())) {
+                if (product.getImageUrl() != null) {
+                    productImageService.deleteProductImageFile(product.getImageUrl());
+                }
+                product.setImageUrl(newUrl);
+            }
+        }
         if (request.getUnit() != null) product.setUnit(request.getUnit());
         if (request.getPurchasePrice() != null) product.setPurchasePrice(request.getPurchasePrice());
         if (request.getSalePrice() != null) product.setSalePrice(request.getSalePrice());
         if (request.getTaxRate() != null) product.setTaxRate(request.getTaxRate());
         if (request.getTaxable() != null) product.setTaxable(request.getTaxable());
-        if (request.getActive() != null) product.setActive(request.getActive());
+        if (request.getActive() != null) {
+            product.setActive(request.getActive());
+        } else if (request.getAvailable() != null && Boolean.TRUE.equals(request.getAvailable())) {
+            product.setActive(true);
+        }
         if (request.getAvailable() != null) product.setAvailable(request.getAvailable());
         if (request.getTrackStock() != null) product.setTrackStock(request.getTrackStock());
         if (request.getMinStockLevel() != null) product.setMinStockLevel(request.getMinStockLevel());
@@ -151,6 +187,39 @@ public class ProductService {
         if (request.getModifierGroupIds() != null) {
             List<ModifierGroup> groups = modifierGroupRepository.findAllById(request.getModifierGroupIds());
             product.setModifierGroups(new java.util.HashSet<>(groups));
+        }
+
+        Product saved = productRepository.save(product);
+        return toResponse(saved);
+    }
+
+    public String uploadProductImage(MultipartFile file) {
+        return productImageService.uploadProductImage(file);
+    }
+
+    @Transactional
+    public ProductDto.Response uploadAndAttachImage(UUID id, UUID tenantId, MultipartFile file) {
+        Product product = productRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
+                .orElseThrow(() -> PosException.notFound("Product not found: " + id));
+
+        String newImageUrl = productImageService.uploadProductImage(file);
+        if (product.getImageUrl() != null && !product.getImageUrl().equals(newImageUrl)) {
+            productImageService.deleteProductImageFile(product.getImageUrl());
+        }
+
+        product.setImageUrl(newImageUrl);
+        Product saved = productRepository.save(product);
+        return toResponse(saved);
+    }
+
+    @Transactional
+    public ProductDto.Response removeProductImage(UUID id, UUID tenantId) {
+        Product product = productRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
+                .orElseThrow(() -> PosException.notFound("Product not found: " + id));
+
+        if (product.getImageUrl() != null) {
+            productImageService.deleteProductImageFile(product.getImageUrl());
+            product.setImageUrl(null);
         }
 
         Product saved = productRepository.save(product);

@@ -1,6 +1,7 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import {
   InventoryService,
   InventoryDashboardStats,
@@ -20,7 +21,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="inventory-page fade-in">
       <!-- HEADER -->
@@ -214,22 +215,22 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
         <div class="table-toolbar">
           <div class="search-box">
             <span class="search-icon">🔍</span>
-            <input type="text" class="pos-input" placeholder="Mahsulot nomi yoki SKU bo'yicha qidirish..." [(ngModel)]="itemSearchQuery" />
+            <input type="text" class="pos-input" placeholder="Mahsulot nomi yoki SKU bo'yicha qidirish..." [(ngModel)]="itemSearchQuery" (ngModelChange)="itemPageIndex = 0" />
           </div>
 
           <div class="filter-controls">
-            <select class="pos-select" [(ngModel)]="selectedWarehouseFilter" (change)="loadItems()">
+            <select class="pos-select" [(ngModel)]="selectedWarehouseFilter" (change)="loadItems(); itemPageIndex = 0">
               <option value="">Barcha omborlar</option>
               <option *ngFor="let w of warehouses" [value]="w.id">{{ w.name }}</option>
             </select>
 
-            <select class="pos-select" [(ngModel)]="selectedCategoryFilter" (change)="loadItems()">
+            <select class="pos-select" [(ngModel)]="selectedCategoryFilter" (change)="loadItems(); itemPageIndex = 0">
               <option value="">Barcha kategoriyalar</option>
               <option *ngFor="let cat of itemCategories" [value]="cat">{{ cat }}</option>
             </select>
 
             <label class="checkbox-toggle">
-              <input type="checkbox" [(ngModel)]="onlyLowStockFilter" (change)="loadItems()" />
+              <input type="checkbox" [(ngModel)]="onlyLowStockFilter" (change)="loadItems(); itemPageIndex = 0" />
               <span>Faqat kam qolganlar</span>
             </label>
           </div>
@@ -252,7 +253,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let item of filteredItems">
+              <tr *ngFor="let item of pagedItems">
                 <td><span class="sku-tag">{{ item.sku || '---' }}</span></td>
                 <td><strong>{{ item.name }}</strong></td>
                 <td><span class="category-pill">{{ item.category || 'Umumiy' }}</span></td>
@@ -283,6 +284,16 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            *ngIf="filteredItems.length > 0"
+            [length]="filteredItems.length"
+            [pageSize]="itemPageSize"
+            [pageIndex]="itemPageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onItemPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -316,7 +327,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let p of purchases">
+              <tr *ngFor="let p of pagedPurchases">
                 <td><strong>{{ p.purchaseNumber }}</strong></td>
                 <td>{{ p.invoiceNumber || '---' }}</td>
                 <td>{{ p.purchaseDate || (p.createdAt | date:'yyyy-MM-dd') }}</td>
@@ -334,6 +345,16 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            *ngIf="purchases.length > 0"
+            [length]="purchases.length"
+            [pageSize]="kirimPageSize"
+            [pageIndex]="kirimPageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onKirimPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -366,7 +387,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let m of outboundTransactions">
+              <tr *ngFor="let m of pagedOutbound">
                 <td>{{ m.createdAt | date:'yyyy-MM-dd HH:mm' }}</td>
                 <td><strong>{{ m.itemName }}</strong></td>
                 <td>
@@ -385,6 +406,16 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            *ngIf="outboundTransactions.length > 0"
+            [length]="outboundTransactions.length"
+            [pageSize]="chiqimPageSize"
+            [pageIndex]="chiqimPageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onChiqimPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -394,7 +425,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
       <div *ngIf="activeTab === 'movements'" class="tab-content">
         <div class="table-toolbar">
           <div class="filter-controls">
-            <select class="pos-select" [(ngModel)]="movementTypeFilter" (change)="loadTransactions()">
+            <select class="pos-select" [(ngModel)]="movementTypeFilter" (change)="loadTransactions(); movementsPageIndex = 0">
               <option value="ALL">Barcha harakat turlari</option>
               <option value="PURCHASE">Kirim (PURCHASE)</option>
               <option value="OUT">Chiqim (OUT)</option>
@@ -403,13 +434,13 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               <option value="ADJUSTMENT">Tuzatish (ADJUSTMENT)</option>
             </select>
 
-            <select class="pos-select" [(ngModel)]="movementItemFilter" (change)="loadTransactions()">
+            <select class="pos-select" [(ngModel)]="movementItemFilter" (change)="loadTransactions(); movementsPageIndex = 0">
               <option value="">Barcha mahsulotlar</option>
               <option *ngFor="let it of items" [value]="it.id">{{ it.name }}</option>
             </select>
 
-            <input type="date" class="pos-input" [(ngModel)]="movementDateFrom" (change)="loadTransactions()" />
-            <input type="date" class="pos-input" [(ngModel)]="movementDateTo" (change)="loadTransactions()" />
+            <input type="date" class="pos-input" [(ngModel)]="movementDateFrom" (change)="loadTransactions(); movementsPageIndex = 0" />
+            <input type="date" class="pos-input" [(ngModel)]="movementDateTo" (change)="loadTransactions(); movementsPageIndex = 0" />
           </div>
         </div>
 
@@ -430,7 +461,7 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let tx of transactions">
+              <tr *ngFor="let tx of pagedTransactions">
                 <td>{{ tx.createdAt | date:'yyyy-MM-dd HH:mm' }}</td>
                 <td><strong>{{ tx.itemName }}</strong></td>
                 <td>
@@ -458,6 +489,16 @@ type InventoryTab = 'dashboard' | 'items' | 'kirim' | 'chiqim' | 'movements' | '
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            *ngIf="transactions.length > 0"
+            [length]="transactions.length"
+            [pageSize]="movementsPageSize"
+            [pageIndex]="movementsPageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onMovementsPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -1452,6 +1493,73 @@ export class InventoryComponent implements OnInit {
   movementDateFrom = '';
   movementDateTo = '';
 
+  // Pagination
+  pageSizeOptions = [10, 25, 50, 100];
+  itemPageIndex = 0;
+  itemPageSize = 10;
+  kirimPageIndex = 0;
+  kirimPageSize = 10;
+  chiqimPageIndex = 0;
+  chiqimPageSize = 10;
+  movementsPageIndex = 0;
+  movementsPageSize = 10;
+
+  onItemPageChange(event: PageEvent): void {
+    this.itemPageIndex = event.pageIndex;
+    this.itemPageSize = event.pageSize;
+  }
+
+  get pagedItems(): InventoryItem[] {
+    const list = this.filteredItems;
+    if (this.itemPageIndex * this.itemPageSize >= list.length && list.length > 0) {
+      this.itemPageIndex = Math.max(0, Math.ceil(list.length / this.itemPageSize) - 1);
+    }
+    const start = this.itemPageIndex * this.itemPageSize;
+    return list.slice(start, start + this.itemPageSize);
+  }
+
+  onKirimPageChange(event: PageEvent): void {
+    this.kirimPageIndex = event.pageIndex;
+    this.kirimPageSize = event.pageSize;
+  }
+
+  get pagedPurchases(): PurchaseResponse[] {
+    const list = this.purchases;
+    if (this.kirimPageIndex * this.kirimPageSize >= list.length && list.length > 0) {
+      this.kirimPageIndex = Math.max(0, Math.ceil(list.length / this.kirimPageSize) - 1);
+    }
+    const start = this.kirimPageIndex * this.kirimPageSize;
+    return list.slice(start, start + this.kirimPageSize);
+  }
+
+  onChiqimPageChange(event: PageEvent): void {
+    this.chiqimPageIndex = event.pageIndex;
+    this.chiqimPageSize = event.pageSize;
+  }
+
+  get pagedOutbound(): InventoryTransaction[] {
+    const list = this.outboundTransactions;
+    if (this.chiqimPageIndex * this.chiqimPageSize >= list.length && list.length > 0) {
+      this.chiqimPageIndex = Math.max(0, Math.ceil(list.length / this.chiqimPageSize) - 1);
+    }
+    const start = this.chiqimPageIndex * this.chiqimPageSize;
+    return list.slice(start, start + this.chiqimPageSize);
+  }
+
+  onMovementsPageChange(event: PageEvent): void {
+    this.movementsPageIndex = event.pageIndex;
+    this.movementsPageSize = event.pageSize;
+  }
+
+  get pagedTransactions(): InventoryTransaction[] {
+    const list = this.transactions;
+    if (this.movementsPageIndex * this.movementsPageSize >= list.length && list.length > 0) {
+      this.movementsPageIndex = Math.max(0, Math.ceil(list.length / this.movementsPageSize) - 1);
+    }
+    const start = this.movementsPageIndex * this.movementsPageSize;
+    return list.slice(start, start + this.movementsPageSize);
+  }
+
   recipeSearchQuery = '';
   selectedRecipeProduct: ProductRecipe | null = null;
   currentRecipeIngredients: { inventoryItemId: string; quantity: number; unit: string; costPrice: number; totalCost: number }[] = [];
@@ -1496,10 +1604,10 @@ export class InventoryComponent implements OnInit {
   setTab(tab: InventoryTab): void {
     this.activeTab = tab;
     if (tab === 'dashboard') this.loadDashboard();
-    if (tab === 'items') this.loadItems();
-    if (tab === 'kirim') this.loadPurchases();
-    if (tab === 'chiqim') this.loadTransactions();
-    if (tab === 'movements') this.loadTransactions();
+    if (tab === 'items') { this.itemPageIndex = 0; this.loadItems(); }
+    if (tab === 'kirim') { this.kirimPageIndex = 0; this.loadPurchases(); }
+    if (tab === 'chiqim') { this.chiqimPageIndex = 0; this.loadTransactions(); }
+    if (tab === 'movements') { this.movementsPageIndex = 0; this.loadTransactions(); }
     if (tab === 'audit') this.loadAudits();
     if (tab === 'recipes') this.loadRecipes();
     if (tab === 'warehouses') { this.loadWarehouses(); this.loadSuppliers(); }

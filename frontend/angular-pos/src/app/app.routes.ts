@@ -48,6 +48,12 @@ export const routes: Routes = [
         data: { permission: 'KITCHEN_VIEW', disallowRoles: ['WAITER'], title: 'Kitchen' }
       },
       {
+        path: 'kitchens',
+        loadComponent: () => import('./kitchen/kitchen-management/kitchen-management.component').then(m => m.KitchenManagementComponent),
+        canActivate: [permissionGuard],
+        data: { permission: 'MANAGE_SETTINGS', disallowRoles: ['KITCHEN', 'WAITER'], title: 'Oshxonalar' }
+      },
+      {
         path: 'orders',
         loadComponent: () => import('./orders/orders-list/orders-list.component').then(m => m.OrdersListComponent),
         canActivate: [permissionGuard],

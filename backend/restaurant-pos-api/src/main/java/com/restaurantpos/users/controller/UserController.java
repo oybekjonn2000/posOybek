@@ -26,9 +26,16 @@ public class UserController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('MANAGE_USERS') or hasAuthority('VIEW_DASHBOARD')")
-    @Operation(summary = "Get all employees")
+    @Operation(summary = "Get employees with optional pagination")
     public ResponseEntity<ApiResponse<List<UserDto.Response>>> getAllUsers(
-            @AuthenticationPrincipal UserPrincipal user) {
+            @AuthenticationPrincipal UserPrincipal user,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size);
+            org.springframework.data.domain.Page<UserDto.Response> pageResult = userService.getUsersPaginated(user.getTenantId(), pageable);
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
         List<UserDto.Response> users = userService.getAllUsers(user.getTenantId());
         return ResponseEntity.ok(ApiResponse.success(users));
     }

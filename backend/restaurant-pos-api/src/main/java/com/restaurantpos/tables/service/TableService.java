@@ -165,6 +165,12 @@ public class TableService {
         RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Table not found: " + id));
 
+        if (currentUser != null && currentUser.isWaiter()) {
+            if (table.getWaiter() != null && !table.getWaiter().getId().equals(currentUser.getUserId())) {
+                throw PosException.forbidden("Bu stol boshqa ofitsantga biriktirilgan.");
+            }
+        }
+
         if (table.getCurrentOrderId() != null) {
             Order order = orderRepository.findById(table.getCurrentOrderId()).orElse(null);
             if (order != null && order.getStatus() != Order.OrderStatus.PAID) {
@@ -241,15 +247,28 @@ public class TableService {
 
     @Transactional
     public TableDto.Response updateTableStatus(UUID id, UUID tenantId, TableDto.UpdateStatusRequest request) {
+        return updateTableStatus(id, tenantId, null, request);
+    }
+
+    @Transactional
+    public TableDto.Response updateTableStatus(UUID id, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal currentUser, TableDto.UpdateStatusRequest request) {
         RestaurantTable table = tableRepository.findByIdAndTenantIdAndDeletedAtIsNull(id, tenantId)
                 .orElseThrow(() -> PosException.notFound("Table not found: " + id));
 
+        if (currentUser != null && currentUser.isWaiter()) {
+            if (table.getWaiter() != null && !table.getWaiter().getId().equals(currentUser.getUserId())) {
+                throw PosException.forbidden("Bu stol boshqa ofitsantga biriktirilgan.");
+            }
+        }
+
         table.setStatus(RestaurantTable.TableStatus.valueOf(request.getStatus().toUpperCase()));
-        table.setCurrentOrderId(request.getCurrentOrderId());
+        if (currentUser == null || !currentUser.isWaiter()) {
+            table.setCurrentOrderId(request.getCurrentOrderId());
+        }
 
         RestaurantTable saved = tableRepository.save(table);
         Order order = saved.getCurrentOrderId() != null ? orderRepository.findById(saved.getCurrentOrderId()).orElse(null) : null;
-        TableDto.Response res = toResponse(saved, order);
+        TableDto.Response res = toResponse(saved, order, currentUser);
         wsNotification.notifyTableUpdated(tenantId, res);
         return res;
     }

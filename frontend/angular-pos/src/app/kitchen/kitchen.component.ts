@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
 import { WebsocketService } from '../core/services/websocket.service';
 import { Order, OrderItem } from '../core/services/order.service';
@@ -8,7 +9,7 @@ import { Order, OrderItem } from '../core/services/order.service';
 @Component({
   selector: 'app-kitchen',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="kds-container fade-in">
       <!-- Top Bar -->
@@ -43,25 +44,25 @@ import { Order, OrderItem } from '../core/services/order.service';
             <button
               class="filter-tab"
               [class.active]="currentFilter === 'ALL'"
-              (click)="currentFilter = 'ALL'">
+              (click)="currentFilter = 'ALL'; pageIndex = 0">
               Barchasi ({{ orders.length }})
             </button>
             <button
               class="filter-tab"
               [class.active]="currentFilter === 'NEW'"
-              (click)="currentFilter = 'NEW'">
+              (click)="currentFilter = 'NEW'; pageIndex = 0">
               Yangi ({{ countByStatus('NEW') }})
             </button>
             <button
               class="filter-tab"
               [class.active]="currentFilter === 'COOKING'"
-              (click)="currentFilter = 'COOKING'">
+              (click)="currentFilter = 'COOKING'; pageIndex = 0">
               Tayyorlanmoqda ({{ countByStatus('COOKING') }})
             </button>
             <button
               class="filter-tab"
               [class.active]="currentFilter === 'READY'"
-              (click)="currentFilter = 'READY'">
+              (click)="currentFilter = 'READY'; pageIndex = 0">
               Tayyor ({{ countByStatus('READY') }})
             </button>
           </div>
@@ -141,7 +142,7 @@ import { Order, OrderItem } from '../core/services/order.service';
       <!-- Orders Grid -->
       <div *ngIf="filteredOrders.length > 0" class="kds-grid">
         <div
-          *ngFor="let order of filteredOrders"
+          *ngFor="let order of pagedOrders"
           class="kds-card"
           [class.kds-card--urgent]="isUrgent(order)">
           
@@ -247,6 +248,17 @@ import { Order, OrderItem } from '../core/services/order.service';
           </div>
         </div>
       </div>
+
+      <!-- Material Paginator -->
+      <mat-paginator
+        *ngIf="filteredOrders.length > 0"
+        [length]="filteredOrders.length"
+        [pageSize]="pageSize"
+        [pageIndex]="pageIndex"
+        [pageSizeOptions]="pageSizeOptions"
+        [showFirstLastButtons]="true"
+        (page)="onPageChange($event)">
+      </mat-paginator>
     </div>
   `,
   styles: [`
@@ -904,6 +916,11 @@ export class KitchenComponent implements OnInit, OnDestroy {
   loading = false;
   currentFilter: 'ALL' | 'NEW' | 'COOKING' | 'READY' = 'ALL';
 
+  // Pagination
+  pageIndex = 0;
+  pageSize = 10;
+  pageSizeOptions = [10, 25, 50, 100];
+
   cancellationAlert: {
     orderNumber: string;
     tableName: string;
@@ -959,6 +976,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
 
   selectKitchen(k: KitchenStation | null): void {
     this.selectedKitchen = k;
+    this.pageIndex = 0;
     this.loadOrders();
     this.cdr.markForCheck();
   }
@@ -1146,6 +1164,20 @@ export class KitchenComponent implements OnInit, OnDestroy {
         return st === this.currentFilter;
       })
     );
+  }
+
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+  }
+
+  get pagedOrders(): Order[] {
+    const list = this.filteredOrders;
+    if (this.pageIndex * this.pageSize >= list.length && list.length > 0) {
+      this.pageIndex = Math.max(0, Math.ceil(list.length / this.pageSize) - 1);
+    }
+    const start = this.pageIndex * this.pageSize;
+    return list.slice(start, start + this.pageSize);
   }
 
   countByStatus(status: string): number {

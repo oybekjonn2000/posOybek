@@ -222,6 +222,7 @@ export class SidebarComponent {
     { icon: '👨‍🍳', label: 'Oshxona', route: '/kitchen', permission: 'KITCHEN_VIEW' },
     { icon: '🍔', label: 'Mahsulotlar', route: '/products', permission: 'MANAGE_PRODUCTS' },
     { icon: '📁', label: 'Kategoriyalar', route: '/categories', permission: 'MANAGE_CATEGORIES' },
+    { icon: '🥘', label: 'Oshxonalar', route: '/kitchens', permission: 'MANAGE_SETTINGS', disallowRoles: ['KITCHEN', 'WAITER'] },
     // { icon: '📦', label: 'Ombor', route: '/inventory', permission: 'VIEW_STOCK' }, // Hozircha disable qilindi
     { icon: '👥', label: 'Mijozlar', route: '/customers', adminOnly: true },
     { icon: '👤', label: 'Xodimlar', route: '/employees', permission: 'MANAGE_USERS' },

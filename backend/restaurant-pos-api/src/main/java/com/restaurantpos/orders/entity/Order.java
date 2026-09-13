@@ -139,14 +139,14 @@ public class Order extends BaseEntity {
             this.discountAmount = subtotal.multiply(discountPercent).divide(BigDecimal.valueOf(100));
         }
 
-        BigDecimal taxableAmount = subtotal.subtract(discountAmount);
+        BigDecimal taxableAmount = subtotal.subtract(discountAmount).max(BigDecimal.ZERO);
         this.taxAmount = items.stream()
                 .filter(item -> !item.isVoided())
                 .map(item -> item.getTaxAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.total = taxableAmount.add(taxAmount).add(
-                deliveryFee != null ? deliveryFee : BigDecimal.ZERO);
+                deliveryFee != null ? deliveryFee : BigDecimal.ZERO).max(BigDecimal.ZERO);
     }
 
     public enum OrderType {

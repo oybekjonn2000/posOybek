@@ -13,4 +13,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     List<OrderItem> findByOrderIdOrderBySortOrderAsc(UUID orderId);
 
     List<OrderItem> findByKitchenStatusInAndVoidedFalseOrderByCreatedAtAsc(List<OrderItem.KitchenStatus> statuses);
+
+    long countByKitchenId(UUID kitchenId);
 }

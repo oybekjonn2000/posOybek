@@ -10,6 +10,7 @@ export interface OrderItem {
   kitchenId?: string;
   kitchenName?: string;
   productName: string;
+  imageUrl?: string;
   unitPrice?: number;
   productPrice?: number;
   quantity: number;
@@ -119,15 +120,20 @@ export class OrderService {
 
   constructor(private http: HttpClient) {}
 
-  getActiveOrders(): Observable<ApiResponse<Order[]>> {
-    return this.http.get<ApiResponse<Order[]>>(this.API);
+  getActiveOrders(page?: number, size?: number): Observable<ApiResponse<Order[]>> {
+    let params = new HttpParams();
+    if (page !== undefined && page !== null) params = params.set('page', page.toString());
+    if (size !== undefined && size !== null) params = params.set('size', size.toString());
+    return this.http.get<ApiResponse<Order[]>>(this.API, { params });
   }
 
-  getOrderHistory(params?: { tableId?: string; paymentMethod?: string; search?: string }): Observable<ApiResponse<Order[]>> {
+  getOrderHistory(params?: { tableId?: string; paymentMethod?: string; search?: string; page?: number; size?: number }): Observable<ApiResponse<Order[]>> {
     let httpParams = new HttpParams();
     if (params?.tableId) httpParams = httpParams.set('tableId', params.tableId);
     if (params?.paymentMethod && params.paymentMethod !== 'ALL') httpParams = httpParams.set('paymentMethod', params.paymentMethod);
     if (params?.search) httpParams = httpParams.set('search', params.search);
+    if (params?.page !== undefined && params?.page !== null) httpParams = httpParams.set('page', params.page.toString());
+    if (params?.size !== undefined && params?.size !== null) httpParams = httpParams.set('size', params.size.toString());
     return this.http.get<ApiResponse<Order[]>>(`${this.API}/history`, { params: httpParams });
   }
 

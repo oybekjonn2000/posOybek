@@ -331,6 +331,22 @@ public class SettingsService {
                 ).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<SettingsDto.AuditLogResponse> getAuditLogsPaginated(UUID tenantId, org.springframework.data.domain.Pageable pageable) {
+        return auditLogRepository.findAllByTenantIdOrderByCreatedAtDesc(tenantId, pageable)
+                .map(a -> SettingsDto.AuditLogResponse.builder()
+                        .id(a.getId())
+                        .action(a.getAction())
+                        .entityType(a.getEntityType())
+                        .entityId(a.getEntityId())
+                        .oldValue(a.getOldValue())
+                        .newValue(a.getNewValue())
+                        .notes(a.getNotes())
+                        .userName(a.getUser() != null ? a.getUser().getFullName() : "Tizim")
+                        .createdAt(a.getCreatedAt())
+                        .build());
+    }
+
     private String getCurrencySymbol(String currency) {
         if ("UZS".equalsIgnoreCase(currency)) return "so'm";
         if ("USD".equalsIgnoreCase(currency)) return "$";

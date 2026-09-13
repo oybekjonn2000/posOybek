@@ -1,0 +1,5 @@
+# Created at 2026-09-14T03:43:08.108
+Boot Manifest-JAR contains absolute paths in classpath 'E:\posOybek\backend\restaurant-pos-api\target\test-classes'
+Hint: <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+'other' has different root
+

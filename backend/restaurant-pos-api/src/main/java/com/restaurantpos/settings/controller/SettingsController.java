@@ -55,6 +55,7 @@ public class SettingsController {
     }
 
     @GetMapping("/system/info")
+    @PreAuthorize("hasAuthority('MANAGE_SETTINGS') or hasRole('ADMIN') or hasRole('MANAGER')")
     @Operation(summary = "Get live system diagnostic information and status")
     public ResponseEntity<ApiResponse<SettingsDto.SystemInfoDto>> getSystemInfo(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -64,10 +65,17 @@ public class SettingsController {
 
     @GetMapping("/audit-logs")
     @PreAuthorize("hasAuthority('VIEW_AUDIT_LOGS') or hasAuthority('MANAGE_SETTINGS') or hasRole('ADMIN')")
-    @Operation(summary = "Get recent audit trail for settings and system modifications")
+    @Operation(summary = "Get audit trail with optional pagination")
     public ResponseEntity<ApiResponse<List<SettingsDto.AuditLogResponse>>> getAuditLogs(
             @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
             @AuthenticationPrincipal UserPrincipal user) {
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size != null ? size : limit);
+            org.springframework.data.domain.Page<SettingsDto.AuditLogResponse> pageResult = settingsService.getAuditLogsPaginated(user.getTenantId(), pageable);
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
         List<SettingsDto.AuditLogResponse> logs = settingsService.getAuditLogs(user.getTenantId(), limit);
         return ResponseEntity.ok(ApiResponse.success(logs));
     }

@@ -25,11 +25,19 @@ public class CategoryController {
     private final CategoryService categoryService;
 
     @GetMapping
-    @Operation(summary = "Get all categories, optionally filtered by kitchenId")
+    @Operation(summary = "Get all categories, optionally filtered by kitchenId and paginated")
     public ResponseEntity<ApiResponse<List<CategoryDto.Response>>> getCategories(
             @AuthenticationPrincipal UserPrincipal user,
             @RequestParam(required = false, defaultValue = "false") boolean activeOnly,
-            @RequestParam(required = false) UUID kitchenId) {
+            @RequestParam(required = false) UUID kitchenId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size);
+            org.springframework.data.domain.Page<CategoryDto.Response> pageResult =
+                    categoryService.getCategoriesPaginated(user.getTenantId(), activeOnly, kitchenId, pageable);
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
         List<CategoryDto.Response> categories = categoryService.getAllCategories(user.getTenantId(), activeOnly, kitchenId);
         return ResponseEntity.ok(ApiResponse.success(categories));
     }

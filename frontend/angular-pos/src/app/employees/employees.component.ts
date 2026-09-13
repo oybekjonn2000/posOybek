@@ -1,13 +1,14 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { UserService, Employee, Role, CreateEmployeeRequest, UpdateEmployeeRequest } from '../core/services/user.service';
 import { KitchenService, KitchenStation } from '../core/services/kitchen.service';
 
 @Component({
   selector: 'app-employees',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="employees-page fade-in">
       <!-- Header -->
@@ -22,6 +23,42 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
         </button>
       </div>
 
+      <!-- Search & Filters -->
+      <div class="filter-strip" style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+        <div class="search-box" style="flex: 1; min-width: 220px;">
+          <input
+            type="text"
+            placeholder="Qidiruv (Ism, login, telefon)..."
+            [(ngModel)]="searchQuery"
+            (ngModelChange)="pageIndex = 0"
+            class="pos-input"
+            style="width: 100%;"
+          />
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <select [(ngModel)]="roleFilter" (ngModelChange)="pageIndex = 0" class="pos-input pos-select-sm">
+            <option value="ALL">Barcha lavozimlar</option>
+            <option value="ADMIN">Admin</option>
+            <option value="MANAGER">Menejer</option>
+            <option value="WAITER">Ofitsiant</option>
+            <option value="KITCHEN">Oshpaz</option>
+            <option value="CASHIER">Kassir</option>
+          </select>
+
+          <select [(ngModel)]="statusFilter" (ngModelChange)="pageIndex = 0" class="pos-input pos-select-sm">
+            <option value="ALL">Barcha holatlar</option>
+            <option value="ACTIVE">Faol</option>
+            <option value="INACTIVE">Nofaol</option>
+          </select>
+
+          <select *ngIf="kitchens.length > 0" [(ngModel)]="kitchenFilter" (ngModelChange)="pageIndex = 0" class="pos-input pos-select-sm">
+            <option value="ALL">Barcha oshxonalar</option>
+            <option *ngFor="let k of kitchens" [value]="k.id">{{ k.name }}</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Employees Table Card -->
       <div class="pos-card table-card">
         <div *ngIf="loading && employees.length === 0" class="loading-state">
@@ -29,15 +66,16 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
           <p>Xodimlar ro'yxati yuklanmoqda...</p>
         </div>
 
-        <div *ngIf="!loading && employees.length === 0" class="empty-state">
+        <div *ngIf="!loading && filteredEmployees.length === 0" class="empty-state">
           <div class="empty-icon">👥</div>
           <h3>Xodimlar topilmadi</h3>
-          <button class="pos-btn pos-btn--primary" (click)="openCreateModal()" style="margin-top: 12px;">
+          <p *ngIf="employees.length > 0" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Qidiruv yoki filtr bo'yicha hech qanday xodim topilmadi.</p>
+          <button *ngIf="employees.length === 0" class="pos-btn pos-btn--primary" (click)="openCreateModal()" style="margin-top: 12px;">
             Yangi xodim qo'shish
           </button>
         </div>
 
-        <div *ngIf="employees.length > 0" class="table-responsive">
+        <div *ngIf="filteredEmployees.length > 0" class="table-responsive">
           <table class="pos-table">
             <thead>
               <tr>
@@ -51,7 +89,7 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let emp of employees">
+              <tr *ngFor="let emp of pagedEmployees">
                 <td>
                   <div class="user-cell">
                     <div class="user-avatar">{{ getInitials(emp) }}</div>
@@ -117,6 +155,16 @@ import { KitchenService, KitchenStation } from '../core/services/kitchen.service
             </tbody>
           </table>
         </div>
+
+        <mat-paginator
+          *ngIf="filteredEmployees.length > 0"
+          [length]="filteredEmployees.length"
+          [pageSize]="pageSize"
+          [pageIndex]="pageIndex"
+          [pageSizeOptions]="pageSizeOptions"
+          [showFirstLastButtons]="true"
+          (page)="onPageChange($event)">
+        </mat-paginator>
       </div>
 
       <!-- ============================================================ -->
@@ -641,6 +689,56 @@ export class EmployeesComponent implements OnInit {
   kitchens: KitchenStation[] = [];
   loading = false;
   saving = false;
+
+  // Search, Filters & Pagination
+  searchQuery = '';
+  roleFilter = 'ALL';
+  statusFilter = 'ALL';
+  kitchenFilter = 'ALL';
+  pageIndex = 0;
+  pageSize = 10;
+  pageSizeOptions = [10, 25, 50, 100];
+
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+  }
+
+  get filteredEmployees(): Employee[] {
+    return this.employees.filter(emp => {
+      if (this.roleFilter !== 'ALL' && emp.role !== this.roleFilter) {
+        return false;
+      }
+      if (this.statusFilter === 'ACTIVE' && !emp.active) {
+        return false;
+      }
+      if (this.statusFilter === 'INACTIVE' && emp.active) {
+        return false;
+      }
+      if (this.kitchenFilter !== 'ALL') {
+        const hasKitchen = emp.kitchens?.some(k => k.id === this.kitchenFilter) ||
+                           emp.kitchenIds?.includes(this.kitchenFilter);
+        if (!hasKitchen) return false;
+      }
+      if (this.searchQuery.trim()) {
+        const q = this.searchQuery.toLowerCase();
+        const nameMatch = `${emp.firstName} ${emp.lastName || ''}`.toLowerCase().includes(q);
+        const usernameMatch = emp.username?.toLowerCase().includes(q);
+        const phoneMatch = emp.phone?.toLowerCase().includes(q);
+        return nameMatch || usernameMatch || phoneMatch;
+      }
+      return true;
+    });
+  }
+
+  get pagedEmployees(): Employee[] {
+    const list = this.filteredEmployees;
+    if (this.pageIndex * this.pageSize >= list.length && list.length > 0) {
+      this.pageIndex = Math.max(0, Math.ceil(list.length / this.pageSize) - 1);
+    }
+    const start = this.pageIndex * this.pageSize;
+    return list.slice(start, start + this.pageSize);
+  }
 
   // Multi-select kitchen sets
   selectedCreateKitchenIds = new Set<string>();

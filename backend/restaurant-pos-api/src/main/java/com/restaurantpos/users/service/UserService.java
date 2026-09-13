@@ -42,6 +42,12 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<UserDto.Response> getUsersPaginated(UUID tenantId, org.springframework.data.domain.Pageable pageable) {
+        return userRepository.findAllByTenantId(tenantId, pageable)
+                .map(this::mapToResponse);
+    }
+
+    @Transactional(readOnly = true)
     public UserDto.Response getUserById(UUID id, UUID tenantId) {
         User user = userRepository.findByIdAndDeletedAtIsNull(id)
                 .filter(u -> u.getTenant().getId().equals(tenantId))
@@ -92,6 +98,9 @@ public class UserService {
             for (UUID kId : uniqueKitchenIds) {
                 Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kId, tenantId)
                         .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kId));
+                if (!kitchen.isActive()) {
+                    throw PosException.badRequest("Faol bo'lmagan (INACTIVE) oshxonaga xodim biriktirib bo'lmaydi: " + kitchen.getName());
+                }
                 user.getEmployeeKitchens().add(new EmployeeKitchen(tenant, user, kitchen));
             }
             if (!user.getEmployeeKitchens().isEmpty()) {
@@ -160,6 +169,9 @@ public class UserService {
                 if (!existingKitchenIds.contains(kId)) {
                     Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kId, tenantId)
                             .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kId));
+                    if (!kitchen.isActive()) {
+                        throw PosException.badRequest("Faol bo'lmagan (INACTIVE) oshxonaga xodim biriktirib bo'lmaydi: " + kitchen.getName());
+                    }
                     user.getEmployeeKitchens().add(new EmployeeKitchen(user.getTenant(), user, kitchen));
                 }
             }
@@ -211,7 +223,7 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
-    private UserDto.Response mapToResponse(User user) {
+    public UserDto.Response mapToResponse(User user) {
         String roleName = user.getRoles().isEmpty() ? "STAFF" : user.getRoles().iterator().next().getName();
         UUID roleId = user.getRoles().isEmpty() ? null : user.getRoles().iterator().next().getId();
         String fullName = (user.getFirstName() + " " + (user.getLastName() != null ? user.getLastName() : "")).trim();

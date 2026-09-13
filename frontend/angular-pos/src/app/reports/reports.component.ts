@@ -1,6 +1,7 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import {
   ReportsService,
   SalesSummary,
@@ -22,7 +23,7 @@ type ReportTab = 'sales' | 'products' | 'profit' | 'cashier' | 'waiters' | 'kitc
 @Component({
   selector: 'app-reports',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MatPaginatorModule],
   template: `
     <div class="reports-page fade-in">
       <!-- HEADER -->
@@ -247,8 +248,8 @@ type ReportTab = 'sales' | 'products' | 'profit' | 'cashier' | 'waiters' | 'kitc
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let p of productSales; let idx = index">
-                <td>{{ idx + 1 }}</td>
+              <tr *ngFor="let p of pagedProductSales; let idx = index">
+                <td>{{ productSalesPageIndex * productSalesPageSize + idx + 1 }}</td>
                 <td><strong>{{ p.productName }}</strong></td>
                 <td><span class="category-pill">{{ p.categoryName || 'Boshqa' }}</span></td>
                 <td><strong class="text-primary">{{ p.quantity | number:'1.0-2' }} dona</strong></td>
@@ -266,6 +267,16 @@ type ReportTab = 'sales' | 'products' | 'profit' | 'cashier' | 'waiters' | 'kitc
               </tr>
             </tbody>
           </table>
+
+          <mat-paginator
+            *ngIf="productSales.length > 0"
+            [length]="productSales.length"
+            [pageSize]="productSalesPageSize"
+            [pageIndex]="productSalesPageIndex"
+            [pageSizeOptions]="pageSizeOptions"
+            [showFirstLastButtons]="true"
+            (page)="onProductSalesPageChange($event)">
+          </mat-paginator>
         </div>
       </div>
 
@@ -802,6 +813,25 @@ export class ReportsComponent implements OnInit {
   kitchenReports: KitchenPerformance[] = [];
   stockReports: StockReportItem[] = [];
 
+  // Pagination
+  pageSizeOptions = [10, 25, 50, 100];
+  productSalesPageIndex = 0;
+  productSalesPageSize = 10;
+
+  onProductSalesPageChange(event: PageEvent): void {
+    this.productSalesPageIndex = event.pageIndex;
+    this.productSalesPageSize = event.pageSize;
+  }
+
+  get pagedProductSales(): ProductSaleItem[] {
+    const list = this.productSales;
+    if (this.productSalesPageIndex * this.productSalesPageSize >= list.length && list.length > 0) {
+      this.productSalesPageIndex = Math.max(0, Math.ceil(list.length / this.productSalesPageSize) - 1);
+    }
+    const start = this.productSalesPageIndex * this.productSalesPageSize;
+    return list.slice(start, start + this.productSalesPageSize);
+  }
+
   kitchens: KitchenStation[] = [];
   waiters: Employee[] = [];
   warehouses: Warehouse[] = [];
@@ -822,6 +852,7 @@ export class ReportsComponent implements OnInit {
 
   setPreset(preset: 'today' | 'yesterday' | 'week' | 'month' | 'custom'): void {
     this.selectedPreset = preset;
+    this.productSalesPageIndex = 0;
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, '0');
     const toDateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -854,10 +885,12 @@ export class ReportsComponent implements OnInit {
 
   setTab(tab: ReportTab): void {
     this.activeTab = tab;
+    this.productSalesPageIndex = 0;
     this.loadCurrentReport();
   }
 
   onFilterChange(): void {
+    this.productSalesPageIndex = 0;
     this.loadCurrentReport();
   }
 

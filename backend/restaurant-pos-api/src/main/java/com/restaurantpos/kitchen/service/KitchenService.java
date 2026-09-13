@@ -40,6 +40,10 @@ public class KitchenService {
     private final com.restaurantpos.products.repository.CategoryRepository categoryRepository;
     private final com.restaurantpos.products.repository.ProductRepository productRepository;
     private final com.restaurantpos.kitchen.repository.KitchenTicketRepository kitchenTicketRepository;
+    private final com.restaurantpos.users.repository.EmployeeKitchenRepository employeeKitchenRepository;
+    private final com.restaurantpos.users.repository.UserRepository userRepository;
+    private final com.restaurantpos.users.service.UserService userService;
+    private final com.restaurantpos.products.service.CategoryService categoryService;
 
     @Transactional(readOnly = true)
     public List<KitchenDto.Response> getKitchens(UUID tenantId) {
@@ -50,28 +54,53 @@ public class KitchenService {
                 .filter(a -> a.getKitchen() != null && a.isActive() && a.isPrimary())
                 .collect(Collectors.toMap(a -> a.getKitchen().getId(), a -> a, (k1, k2) -> k1));
 
-        return kitchens.stream().map(k -> {
-            com.restaurantpos.printers.entity.PrinterAssignment pa = primaryByKitchen.get(k.getId());
-            UUID printerId = pa != null ? pa.getPrinter().getId() : null;
-            String printerName = pa != null ? pa.getPrinter().getName() : null;
-            String printerStatus = pa != null ? pa.getPrinter().getStatus().name() : null;
+        return kitchens.stream().map(k -> toResponseWithCounts(k, tenantId, primaryByKitchen.get(k.getId()))).collect(Collectors.toList());
+    }
 
-            return KitchenDto.Response.builder()
-                    .id(k.getId())
-                    .name(k.getName())
-                    .code(k.getCode())
-                    .description(k.getDescription())
-                    .sortOrder(k.getSortOrder())
-                    .active(k.isActive())
-                    .color(k.getColor())
-                    .autoPrint(k.isAutoPrint())
-                    .soundNotification(k.isSoundNotification())
-                    .preparationTimeMinutes(k.getPreparationTimeMinutes())
-                    .printerId(printerId)
-                    .printerName(printerName)
-                    .printerStatus(printerStatus)
-                    .build();
-        }).collect(Collectors.toList());
+    private KitchenDto.Response toResponseWithCounts(Kitchen k, UUID tenantId, com.restaurantpos.printers.entity.PrinterAssignment pa) {
+        UUID printerId = pa != null ? pa.getPrinter().getId() : null;
+        String printerName = pa != null ? pa.getPrinter().getName() : null;
+        String printerStatus = pa != null ? pa.getPrinter().getStatus().name() : null;
+
+        int employeesCount = (int) employeeKitchenRepository.countByKitchenId(k.getId());
+        int categoriesCount = (int) categoryRepository.countByTenantIdAndKitchenIdAndDeletedAtIsNull(tenantId, k.getId());
+
+        return KitchenDto.Response.builder()
+                .id(k.getId())
+                .name(k.getName())
+                .code(k.getCode())
+                .description(k.getDescription())
+                .sortOrder(k.getSortOrder())
+                .active(k.isActive())
+                .color(k.getColor())
+                .autoPrint(k.isAutoPrint())
+                .soundNotification(k.isSoundNotification())
+                .preparationTimeMinutes(k.getPreparationTimeMinutes())
+                .printerId(printerId)
+                .printerName(printerName)
+                .printerStatus(printerStatus)
+                .assignedEmployeesCount(employeesCount)
+                .assignedCategoriesCount(categoriesCount)
+                .createdAt(k.getCreatedAt())
+                .updatedAt(k.getUpdatedAt())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public KitchenDto.Response getKitchenById(UUID tenantId, UUID kitchenId) {
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+        com.restaurantpos.printers.entity.PrinterAssignment pa = assignmentRepository
+                .findByTenantIdAndKitchenIdAndActiveTrueAndDeletedAtIsNull(tenantId, kitchenId)
+                .stream().filter(com.restaurantpos.printers.entity.PrinterAssignment::isPrimary).findFirst().orElse(null);
+        return toResponseWithCounts(kitchen, tenantId, pa);
+    }
+
+    @Transactional(readOnly = true)
+    public List<KitchenDto.Response> getActiveKitchens(UUID tenantId) {
+        return getKitchens(tenantId).stream()
+                .filter(KitchenDto.Response::isActive)
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -79,19 +108,34 @@ public class KitchenService {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> PosException.notFound("Tenant not found"));
 
-        kitchenRepository.findByTenantIdAndCodeAndDeletedAtIsNull(tenantId, request.getCode().trim().toUpperCase())
-                .ifPresent(k -> {
-                    throw PosException.badRequest("Bu kodli oshxona allaqachon mavjud: " + request.getCode());
-                });
+        String name = request.getName().trim();
+        if (kitchenRepository.existsByTenantIdAndNameIgnoreCaseAndDeletedAtIsNull(tenantId, name)) {
+            throw PosException.badRequest("Bu nomdagi oshxona allaqachon mavjud: " + name);
+        }
+
+        String code = request.getCode() != null && !request.getCode().isBlank()
+                ? request.getCode().trim().toUpperCase()
+                : generateCodeFromName(name);
+
+        String baseCode = code;
+        int attempts = 0;
+        while (kitchenRepository.existsByTenantIdAndCodeIgnoreCaseAndDeletedAtIsNull(tenantId, code)) {
+            attempts++;
+            code = baseCode + "-" + ((int) (Math.random() * 9000) + 1000);
+            if (attempts > 50) {
+                code = baseCode + "-" + (System.currentTimeMillis() % 100000);
+                break;
+            }
+        }
 
         Kitchen kitchen = new Kitchen();
         kitchen.setTenant(tenant);
-        kitchen.setName(request.getName().trim());
-        kitchen.setCode(request.getCode().trim().toUpperCase());
+        kitchen.setName(name);
+        kitchen.setCode(code);
         kitchen.setDescription(request.getDescription());
-        kitchen.setSortOrder(request.getSortOrder());
-        kitchen.setActive(true);
-        if (request.getColor() != null) kitchen.setColor(request.getColor());
+        kitchen.setSortOrder(request.getSortOrder() > 0 ? request.getSortOrder() : getNextSortOrder(tenantId));
+        kitchen.setActive(request.getActive() != null ? request.getActive() : true);
+        if (request.getColor() != null && !request.getColor().isBlank()) kitchen.setColor(request.getColor());
         if (request.getAutoPrint() != null) kitchen.setAutoPrint(request.getAutoPrint());
         if (request.getSoundNotification() != null) kitchen.setSoundNotification(request.getSoundNotification());
         if (request.getPreparationTimeMinutes() != null) kitchen.setPreparationTimeMinutes(request.getPreparationTimeMinutes());
@@ -102,10 +146,7 @@ public class KitchenService {
             assignKitchenPrinter(tenant, saved, request.getPrinterId());
         }
 
-        return getKitchens(tenantId).stream()
-                .filter(k -> k.getId().equals(saved.getId()))
-                .findFirst()
-                .orElse(null);
+        return getKitchenById(tenantId, saved.getId());
     }
 
     @Transactional
@@ -116,8 +157,20 @@ public class KitchenService {
         Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
 
-        if (request.getName() != null && !request.getName().isBlank()) kitchen.setName(request.getName().trim());
-        if (request.getCode() != null && !request.getCode().isBlank()) kitchen.setCode(request.getCode().trim().toUpperCase());
+        if (request.getName() != null && !request.getName().isBlank()) {
+            String newName = request.getName().trim();
+            if (kitchenRepository.existsByTenantIdAndNameIgnoreCaseAndIdNotAndDeletedAtIsNull(tenantId, newName, kitchenId)) {
+                throw PosException.badRequest("Bu nomdagi oshxona allaqachon mavjud: " + newName);
+            }
+            kitchen.setName(newName);
+        }
+        if (request.getCode() != null && !request.getCode().isBlank()) {
+            String newCode = request.getCode().trim().toUpperCase();
+            if (kitchenRepository.existsByTenantIdAndCodeIgnoreCaseAndIdNotAndDeletedAtIsNull(tenantId, newCode, kitchenId)) {
+                throw PosException.badRequest("Bu kodli oshxona allaqachon mavjud: " + newCode);
+            }
+            kitchen.setCode(newCode);
+        }
         if (request.getDescription() != null) kitchen.setDescription(request.getDescription());
         if (request.getSortOrder() != null) kitchen.setSortOrder(request.getSortOrder());
         if (request.getActive() != null) kitchen.setActive(request.getActive());
@@ -125,6 +178,7 @@ public class KitchenService {
         if (request.getAutoPrint() != null) kitchen.setAutoPrint(request.getAutoPrint());
         if (request.getSoundNotification() != null) kitchen.setSoundNotification(request.getSoundNotification());
         if (request.getPreparationTimeMinutes() != null) kitchen.setPreparationTimeMinutes(request.getPreparationTimeMinutes());
+        kitchen.setUpdatedAt(Instant.now());
 
         Kitchen saved = kitchenRepository.save(kitchen);
 
@@ -132,10 +186,17 @@ public class KitchenService {
             assignKitchenPrinter(tenant, saved, request.getPrinterId());
         }
 
-        return getKitchens(tenantId).stream()
-                .filter(k -> k.getId().equals(saved.getId()))
-                .findFirst()
-                .orElse(null);
+        return getKitchenById(tenantId, saved.getId());
+    }
+
+    @Transactional
+    public KitchenDto.Response toggleKitchenStatus(UUID tenantId, UUID kitchenId, boolean active) {
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+        kitchen.setActive(active);
+        kitchen.setUpdatedAt(Instant.now());
+        kitchenRepository.save(kitchen);
+        return getKitchenById(tenantId, kitchenId);
     }
 
     private void assignKitchenPrinter(Tenant tenant, Kitchen kitchen, UUID printerId) {
@@ -370,6 +431,99 @@ public class KitchenService {
         wsNotification.notifyOrderStatusChanged(item.getOrder().getTenant().getId(), orderService.toResponse(item.getOrder()));
     }
 
+    @Transactional(readOnly = true)
+    public List<KitchenDto.Response> getKitchensFiltered(UUID tenantId, String search, String status) {
+        List<KitchenDto.Response> all = getKitchens(tenantId);
+        return all.stream()
+                .filter(k -> {
+                    if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")) {
+                        if (status.equalsIgnoreCase("ACTIVE") && !k.isActive()) return false;
+                        if (status.equalsIgnoreCase("INACTIVE") && k.isActive()) return false;
+                    }
+                    if (search != null && !search.isBlank()) {
+                        String s = search.trim().toLowerCase();
+                        boolean matchesName = k.getName() != null && k.getName().toLowerCase().contains(s);
+                        boolean matchesDesc = k.getDescription() != null && k.getDescription().toLowerCase().contains(s);
+                        boolean matchesCode = k.getCode() != null && k.getCode().toLowerCase().contains(s);
+                        return matchesName || matchesDesc || matchesCode;
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.restaurantpos.users.dto.UserDto.Response> getKitchenEmployees(UUID tenantId, UUID kitchenId) {
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+        List<com.restaurantpos.users.entity.EmployeeKitchen> assignments = employeeKitchenRepository.findByKitchenId(kitchen.getId());
+        return assignments.stream()
+                .map(com.restaurantpos.users.entity.EmployeeKitchen::getEmployee)
+                .filter(u -> u != null && u.getDeletedAt() == null && u.getTenant().getId().equals(tenantId))
+                .distinct()
+                .map(userService::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.restaurantpos.products.dto.CategoryDto.Response> getKitchenCategories(UUID tenantId, UUID kitchenId) {
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+        return categoryService.getAllCategories(tenantId, false, kitchen.getId());
+    }
+
+    @Transactional
+    public void assignKitchenEmployees(UUID tenantId, UUID kitchenId, List<UUID> employeeIds) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> PosException.notFound("Tenant not found"));
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+
+        if (!kitchen.isActive() && employeeIds != null && !employeeIds.isEmpty()) {
+            throw PosException.badRequest("Faol bo'lmagan (INACTIVE) oshxonaga xodimlarni biriktirib bo'lmaydi.");
+        }
+
+        List<com.restaurantpos.users.entity.EmployeeKitchen> existing = employeeKitchenRepository.findByKitchenId(kitchen.getId());
+        Set<UUID> targetEmployeeIds = employeeIds != null ? new java.util.HashSet<>(employeeIds) : Collections.emptySet();
+
+        for (com.restaurantpos.users.entity.EmployeeKitchen ek : existing) {
+            if (!targetEmployeeIds.contains(ek.getEmployee().getId())) {
+                com.restaurantpos.users.entity.User emp = ek.getEmployee();
+                boolean isKitchenRole = emp.getRoles().stream().anyMatch(r -> "KITCHEN".equalsIgnoreCase(r.getName()));
+                if (isKitchenRole) {
+                    long otherKitchensCount = emp.getEmployeeKitchens().stream()
+                            .filter(otherEk -> !otherEk.getKitchen().getId().equals(kitchen.getId()) && otherEk.getKitchen().isActive())
+                            .count();
+                    if (otherKitchensCount == 0) {
+                        throw PosException.badRequest("Xodim '" + emp.getFullName() + "' KITCHEN rolida va kamida bitta faol oshxonaga ega bo'lishi shart!");
+                    }
+                }
+                emp.getEmployeeKitchens().remove(ek);
+                employeeKitchenRepository.delete(ek);
+                if (emp.getKitchen() != null && emp.getKitchen().getId().equals(kitchen.getId())) {
+                    emp.setKitchen(emp.getEmployeeKitchens().isEmpty() ? null : emp.getEmployeeKitchens().iterator().next().getKitchen());
+                    userRepository.save(emp);
+                }
+            }
+        }
+
+        Set<UUID> currentAssignedEmpIds = existing.stream().map(ek -> ek.getEmployee().getId()).collect(Collectors.toSet());
+        for (UUID empId : targetEmployeeIds) {
+            if (!currentAssignedEmpIds.contains(empId)) {
+                com.restaurantpos.users.entity.User emp = userRepository.findByIdAndDeletedAtIsNull(empId)
+                        .filter(u -> u.getTenant().getId().equals(tenantId))
+                        .orElseThrow(() -> PosException.notFound("Xodim topilmadi: " + empId));
+                com.restaurantpos.users.entity.EmployeeKitchen ek = new com.restaurantpos.users.entity.EmployeeKitchen(tenant, emp, kitchen);
+                emp.getEmployeeKitchens().add(ek);
+                employeeKitchenRepository.save(ek);
+                if (emp.getKitchen() == null) {
+                    emp.setKitchen(kitchen);
+                }
+                userRepository.save(emp);
+            }
+        }
+    }
+
     @Transactional
     public void deleteKitchen(UUID tenantId, UUID kitchenId) {
         Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
@@ -377,15 +531,34 @@ public class KitchenService {
 
         long categoryCount = categoryRepository.countByTenantIdAndKitchenIdAndDeletedAtIsNull(tenantId, kitchenId);
         long productCount = productRepository.countByTenantIdAndKitchenIdAndDeletedAtIsNull(tenantId, kitchenId);
+        long orderItemCount = orderItemRepository.countByKitchenId(kitchenId);
 
-        if (categoryCount > 0 || productCount > 0) {
-            throw PosException.badRequest(String.format(
-                    "Bu oshxonaga %d ta kategoriya va %d ta mahsulot bog'langan. Avval ularni ko'chiring yoki faolsizlantiring.",
-                    categoryCount, productCount));
+        if (categoryCount > 0 || productCount > 0 || orderItemCount > 0) {
+            throw PosException.badRequest(
+                    "Bu oshxonaga boshqa ma'lumotlar bog'langan (" +
+                    (categoryCount > 0 ? categoryCount + " ta kategoriya, " : "") +
+                    (productCount > 0 ? productCount + " ta mahsulot, " : "") +
+                    (orderItemCount > 0 ? orderItemCount + " ta buyurtma mahsuloti" : "") +
+                    "). Uni o'chirish o'rniga faolsizlantirish (INACTIVE) tavsiya etiladi.");
         }
 
+        employeeKitchenRepository.deleteByKitchenId(kitchenId);
         kitchen.setDeletedAt(Instant.now());
         kitchen.setActive(false);
         kitchenRepository.save(kitchen);
+    }
+
+    private String generateCodeFromName(String name) {
+        if (name == null || name.isBlank()) return "KIT-" + (System.currentTimeMillis() % 10000);
+        String normalized = name.replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+        if (normalized.length() > 6) {
+            normalized = normalized.substring(0, 6);
+        }
+        if (normalized.isBlank()) normalized = "KIT";
+        return normalized;
+    }
+
+    private int getNextSortOrder(UUID tenantId) {
+        return kitchenRepository.findByTenantIdAndDeletedAtIsNullOrderBySortOrderAsc(tenantId).size() + 1;
     }
 }

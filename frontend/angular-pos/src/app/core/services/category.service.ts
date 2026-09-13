@@ -36,10 +36,16 @@ export class CategoryService {
 
   constructor(private http: HttpClient) {}
 
-  getCategories(activeOnly: boolean = false, kitchenId?: string): Observable<ApiResponse<Category[]>> {
+  getCategories(activeOnly: boolean = false, kitchenId?: string, page?: number, size?: number): Observable<ApiResponse<Category[]>> {
     let params = new HttpParams().set('activeOnly', activeOnly.toString());
     if (kitchenId) {
       params = params.set('kitchenId', kitchenId);
+    }
+    if (page !== undefined && page !== null) {
+      params = params.set('page', page.toString());
+    }
+    if (size !== undefined && size !== null) {
+      params = params.set('size', size.toString());
     }
     return this.http.get<ApiResponse<Category[]>>(this.API, { params });
   }

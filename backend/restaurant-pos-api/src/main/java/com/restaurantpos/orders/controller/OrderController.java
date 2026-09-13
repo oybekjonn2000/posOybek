@@ -26,20 +26,34 @@ public class OrderController {
     private final OrderService orderService;
 
     @GetMapping({"", "/active"})
-    @Operation(summary = "Get active orders")
+    @Operation(summary = "Get active orders with optional pagination")
     public ResponseEntity<ApiResponse<List<OrderDto.Response>>> getActiveOrders(
-            @AuthenticationPrincipal UserPrincipal user) {
+            @AuthenticationPrincipal UserPrincipal user,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size);
+            org.springframework.data.domain.Page<OrderDto.Response> pageResult = orderService.getActiveOrdersPaginated(user.getTenantId(), user, pageable);
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
         List<OrderDto.Response> orders = orderService.getActiveOrders(user.getTenantId(), user);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
 
     @GetMapping("/history")
-    @Operation(summary = "Get paid/closed orders history")
+    @Operation(summary = "Get paid/closed orders history with optional pagination")
     public ResponseEntity<ApiResponse<List<OrderDto.Response>>> getOrderHistory(
             @RequestParam(required = false) UUID tableId,
             @RequestParam(required = false) String paymentMethod,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
             @AuthenticationPrincipal UserPrincipal user) {
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size);
+            org.springframework.data.domain.Page<OrderDto.Response> pageResult = orderService.getOrderHistoryPaginated(user.getTenantId(), tableId, paymentMethod, search, user, pageable);
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
         List<OrderDto.Response> orders = orderService.getOrderHistory(user.getTenantId(), tableId, paymentMethod, search, user);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
@@ -102,19 +116,22 @@ public class OrderController {
     @Operation(summary = "Apply discount to order")
     public ResponseEntity<ApiResponse<OrderDto.Response>> applyDiscount(
             @PathVariable UUID id,
-            @RequestBody OrderDto.ApplyDiscountRequest request,
+            @Valid @RequestBody OrderDto.ApplyDiscountRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.applyDiscount(id, user.getTenantId(), user, request);
+        UUID tenantId = user != null ? user.getTenantId() : null;
+        OrderDto.Response order = orderService.applyDiscount(id, tenantId, user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Discount applied"));
     }
 
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasAuthority('EDIT_ORDER') or hasRole('ADMIN') or hasRole('MANAGER') or hasRole('WAITER')")
     @Operation(summary = "Update order status")
     public ResponseEntity<ApiResponse<OrderDto.Response>> updateStatus(
             @PathVariable UUID id,
             @Valid @RequestBody OrderDto.UpdateStatusRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        OrderDto.Response order = orderService.updateOrderStatus(id, user.getTenantId(), user, request);
+        UUID tenantId = user != null ? user.getTenantId() : null;
+        OrderDto.Response order = orderService.updateOrderStatus(id, tenantId, user, request);
         return ResponseEntity.ok(ApiResponse.success(order, "Order status updated"));
     }
 

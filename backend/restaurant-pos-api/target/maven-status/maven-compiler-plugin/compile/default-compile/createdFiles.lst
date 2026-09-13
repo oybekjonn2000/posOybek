@@ -8,6 +8,7 @@ com\restaurantpos\settings\dto\SettingsDto$AllSettingsResponse$AllSettingsRespon
 com\restaurantpos\auth\dto\AuthDto$TokenResponse.class
 com\restaurantpos\settings\dto\SettingsDto$OrderSettings$OrderSettingsBuilder.class
 com\restaurantpos\inventory\dto\InventoryDto$ProductRecipeResponse$ProductRecipeResponseBuilder.class
+com\restaurantpos\kitchen\dto\KitchenDto$AssignEmployeesRequest.class
 com\restaurantpos\users\dto\UserDto$RoleResponse.class
 com\restaurantpos\devices\entity\Device.class
 com\restaurantpos\inventory\dto\InventoryDto$DashboardStats$DashboardStatsBuilder.class
@@ -149,7 +150,6 @@ com\restaurantpos\sync\dto\SyncDto$StatusResponse$StatusResponseBuilder.class
 com\restaurantpos\reports\dto\ReportDto$CashierSummary.class
 com\restaurantpos\tables\dto\TableDto$CreateZoneRequest.class
 com\restaurantpos\common\response\ApiResponse$PageMeta$PageMetaBuilder.class
-com\restaurantpos\products\controller\ProductController.class
 com\restaurantpos\orders\controller\OrderController.class
 com\restaurantpos\printers\service\PrinterDiscoveryService$WindowsPrinterInfo.class
 com\restaurantpos\products\dto\ProductDto$UpdateRequest.class

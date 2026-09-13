@@ -82,12 +82,13 @@ public class TableController {
 
 
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasAuthority('MANAGE_TABLES') or hasRole('ADMIN') or hasRole('MANAGER') or hasRole('WAITER')")
     @Operation(summary = "Update table status (FREE, OCCUPIED, RESERVED, BILL_REQUESTED, CLEANING)")
     public ResponseEntity<ApiResponse<TableDto.Response>> updateTableStatus(
             @PathVariable UUID id,
             @Valid @RequestBody TableDto.UpdateStatusRequest request,
             @AuthenticationPrincipal UserPrincipal user) {
-        TableDto.Response updated = tableService.updateTableStatus(id, user.getTenantId(), request);
+        TableDto.Response updated = tableService.updateTableStatus(id, user.getTenantId(), user, request);
         return ResponseEntity.ok(ApiResponse.success(updated, "Table status updated"));
     }
 

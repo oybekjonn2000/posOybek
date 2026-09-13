@@ -90,6 +90,18 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<OrderDto.Response> getActiveOrdersPaginated(
+            UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, org.springframework.data.domain.Pageable pageable) {
+        org.springframework.data.domain.Page<Order> orders;
+        if (user != null && user.isWaiter()) {
+            orders = orderRepository.findActiveOrdersByWaiter(tenantId, user.getUserId(), pageable);
+        } else {
+            orders = orderRepository.findActiveOrders(tenantId, pageable);
+        }
+        return orders.map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
     public List<OrderDto.Response> getOrderHistory(UUID tenantId, UUID tableId, String paymentMethod, String search) {
         return getOrderHistory(tenantId, tableId, paymentMethod, search, null);
     }
@@ -124,6 +136,24 @@ public class OrderService {
                     return true;
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<OrderDto.Response> getOrderHistoryPaginated(
+            UUID tenantId, UUID tableId, String paymentMethod, String search, com.restaurantpos.auth.security.UserPrincipal user, org.springframework.data.domain.Pageable pageable) {
+        if (tableId == null && (search == null || search.isBlank()) && (paymentMethod == null || "ALL".equalsIgnoreCase(paymentMethod))) {
+            org.springframework.data.domain.Page<Order> orders = (user != null && user.isWaiter())
+                    ? orderRepository.findHistoryOrdersByWaiter(tenantId, user.getUserId(), pageable)
+                    : orderRepository.findHistoryOrders(tenantId, pageable);
+            return orders.map(this::toResponse);
+        }
+        List<OrderDto.Response> fullFiltered = getOrderHistory(tenantId, tableId, paymentMethod, search, user);
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), fullFiltered.size());
+        List<OrderDto.Response> pageContent = (start <= end && start < fullFiltered.size())
+                ? fullFiltered.subList(start, end)
+                : Collections.emptyList();
+        return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, fullFiltered.size());
     }
 
     public void validateOrderOwnership(Order order, com.restaurantpos.auth.security.UserPrincipal user) {
@@ -281,7 +311,7 @@ public class OrderService {
 
     private void mergeOrAddItem(Order order, OrderDto.ItemRequest itemReq, UUID tenantId) {
         if (itemReq.getProductId() == null || itemReq.getQuantity() == null || itemReq.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
-            return;
+            throw PosException.badRequest("Mahsulot miqdori 0 dan katta bo'lishi kerak");
         }
 
         // Search for existing non-voided item with same product ID
@@ -385,10 +415,23 @@ public class OrderService {
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
         validateOrderOwnership(order, user);
 
+        if (order.getStatus() == Order.OrderStatus.PAID || order.getStatus() == Order.OrderStatus.CANCELLED) {
+            throw PosException.badRequest("Cannot apply discount to " + order.getStatus() + " order");
+        }
+
         if (request.getPercent() != null) {
+            if (request.getPercent().compareTo(BigDecimal.ZERO) < 0 || request.getPercent().compareTo(BigDecimal.valueOf(100)) > 0) {
+                throw PosException.badRequest("Chegirma foizi 0 dan 100 gacha bo'lishi kerak");
+            }
             order.setDiscountPercent(request.getPercent());
         }
         if (request.getAmount() != null) {
+            if (request.getAmount().compareTo(BigDecimal.ZERO) < 0) {
+                throw PosException.badRequest("Chegirma summasi manfiy bo'lishi mumkin emas");
+            }
+            if (request.getAmount().compareTo(order.getSubtotal()) > 0) {
+                throw PosException.badRequest("Chegirma summasi buyurtma umumiy summasidan oshib ketishi mumkin emas");
+            }
             order.setDiscountAmount(request.getAmount());
         }
 
@@ -407,11 +450,18 @@ public class OrderService {
 
     @Transactional
     public OrderDto.Response updateOrderStatus(UUID orderId, UUID tenantId, com.restaurantpos.auth.security.UserPrincipal user, OrderDto.UpdateStatusRequest request) {
+        String s = request.getStatus() != null ? request.getStatus().toUpperCase() : "";
+        if ("PAID".equals(s) || "REFUNDED".equals(s)) {
+            throw PosException.badRequest("PAID yoki REFUNDED holatini to'g'ridan-to'g'ri o'rnatish taqiqlangan. To'lov tizimidan foydalaning.");
+        }
+        if ("CANCELLED".equals(s)) {
+            throw PosException.badRequest("Buyurtmani bekor qilish uchun bekor qilish so'rovidan foydalaning (/api/orders/{id}/cancel).");
+        }
+
         Order order = orderRepository.findByIdAndTenantIdAndDeletedAtIsNull(orderId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Order not found: " + orderId));
         validateOrderOwnership(order, user);
 
-        String s = request.getStatus().toUpperCase();
         if ("SENT_TO_KITCHEN".equals(s)) s = "IN_PROGRESS";
         Order.OrderStatus status = Order.OrderStatus.valueOf(s);
         order.setStatus(status);
@@ -420,15 +470,6 @@ public class OrderService {
             order.setSentToKitchenAt(Instant.now());
         } else if (status == Order.OrderStatus.READY) {
             order.setReadyAt(Instant.now());
-        } else if (status == Order.OrderStatus.CANCELLED) {
-            order.setClosedAt(Instant.now());
-            if (order.getTable() != null) {
-                RestaurantTable table = order.getTable();
-                table.setStatus(RestaurantTable.TableStatus.FREE);
-                table.setCurrentOrderId(null);
-                table.setWaiter(null);
-                tableRepository.save(table);
-            }
         }
 
         Order saved = orderRepository.save(order);
@@ -755,6 +796,7 @@ public class OrderService {
                 .kitchenName(i.getKitchen() != null ? i.getKitchen().getName() : (i.getProduct() != null && i.getProduct().getKitchen() != null ? i.getProduct().getKitchen().getName() : null))
                 .productName(i.getProductName())
                 .productSku(i.getProductSku())
+                .imageUrl(i.getProduct() != null ? i.getProduct().getImageUrl() : null)
                 .quantity(i.getQuantity())
                 .unitPrice(i.getUnitPrice())
                 .discountAmount(i.getDiscountAmount())

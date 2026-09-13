@@ -43,19 +43,32 @@ public class InventoryController {
     // 2. ITEMS CRUD
     // ==========================================
     @GetMapping
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Ombor mahsulotlari ro'yxati (filterlar bilan)")
     public ResponseEntity<ApiResponse<List<InventoryDto.Response>>> getAll(
             @AuthenticationPrincipal UserPrincipal user,
             @RequestParam(required = false) UUID warehouseId,
             @RequestParam(required = false) String category,
-            @RequestParam(required = false) Boolean lowStock) {
-        return ResponseEntity.ok(ApiResponse.success(
-                inventoryService.getItemsFiltered(user.getTenantId(), warehouseId, category, lowStock)));
+            @RequestParam(required = false) Boolean lowStock,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        List<InventoryDto.Response> items = inventoryService.getItemsFiltered(user.getTenantId(), warehouseId, category, lowStock);
+        if (page != null) {
+            org.springframework.data.domain.Pageable pageable = com.restaurantpos.common.config.PaginationUtils.safePageable(page, size);
+            int start = (int) pageable.getOffset();
+            int end = Math.min(start + pageable.getPageSize(), items.size());
+            List<InventoryDto.Response> content = (start <= end && start < items.size())
+                    ? items.subList(start, end)
+                    : java.util.Collections.emptyList();
+            org.springframework.data.domain.Page<InventoryDto.Response> pageResult =
+                    new org.springframework.data.domain.PageImpl<>(content, pageable, items.size());
+            return ResponseEntity.ok(ApiResponse.success(pageResult.getContent(), ApiResponse.PageMeta.of(pageResult)));
+        }
+        return ResponseEntity.ok(ApiResponse.success(items));
     }
 
     @GetMapping("/low-stock")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Kam qolgan mahsulotlar")
     public ResponseEntity<ApiResponse<List<InventoryDto.Response>>> getLowStock(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -63,7 +76,7 @@ public class InventoryController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Ombor mahsuloti tafsiloti")
     public ResponseEntity<ApiResponse<InventoryDto.Response>> getById(
             @AuthenticationPrincipal UserPrincipal user,
@@ -72,7 +85,7 @@ public class InventoryController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Yangi ombor mahsuloti qo'shish")
     public ResponseEntity<ApiResponse<InventoryDto.Response>> create(
             @AuthenticationPrincipal UserPrincipal user,
@@ -82,7 +95,7 @@ public class InventoryController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Ombor mahsulotini tahrirlash")
     public ResponseEntity<ApiResponse<InventoryDto.Response>> update(
             @AuthenticationPrincipal UserPrincipal user,
@@ -92,7 +105,7 @@ public class InventoryController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Ombor mahsulotini o'chirish")
     public ResponseEntity<ApiResponse<Void>> delete(
             @AuthenticationPrincipal UserPrincipal user,
@@ -105,7 +118,7 @@ public class InventoryController {
     // 3. STOCK ADJUST & OUTBOUND
     // ==========================================
     @PatchMapping("/{id}/adjust")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Ombor miqdorini tuzatish (Adjust)")
     public ResponseEntity<ApiResponse<InventoryDto.Response>> adjust(
             @AuthenticationPrincipal UserPrincipal user,
@@ -116,7 +129,7 @@ public class InventoryController {
     }
 
     @PostMapping("/outbound")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Ombordan chiqim qilish (Oshxona, buzilgan, yaroqlilik)")
     public ResponseEntity<ApiResponse<InventoryDto.Response>> outbound(
             @AuthenticationPrincipal UserPrincipal user,
@@ -129,7 +142,7 @@ public class InventoryController {
     // 4. MOVEMENTS / HARAKATLAR
     // ==========================================
     @GetMapping("/transactions")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Barcha harakatlar tarixi")
     public ResponseEntity<ApiResponse<List<InventoryDto.TransactionResponse>>> getAllTransactions(
             @AuthenticationPrincipal UserPrincipal user,
@@ -150,7 +163,7 @@ public class InventoryController {
     }
 
     @GetMapping("/{id}/transactions")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Muayyan mahsulot harakatlari tarixi")
     public ResponseEntity<ApiResponse<List<InventoryDto.TransactionResponse>>> getItemTransactions(
             @AuthenticationPrincipal UserPrincipal user,
@@ -165,7 +178,7 @@ public class InventoryController {
     // 5. KIRIM / PURCHASES
     // ==========================================
     @GetMapping("/purchases")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Barcha kirim hujjatlari ro'yxati")
     public ResponseEntity<ApiResponse<List<InventoryDto.PurchaseResponse>>> getPurchases(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -173,7 +186,7 @@ public class InventoryController {
     }
 
     @PostMapping("/purchases")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Yangi kirim qilish")
     public ResponseEntity<ApiResponse<InventoryDto.PurchaseResponse>> createPurchase(
             @AuthenticationPrincipal UserPrincipal user,
@@ -186,7 +199,7 @@ public class InventoryController {
     // 6. INVENTARIZATSIYA / AUDITS
     // ==========================================
     @GetMapping("/audits")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Inventarizatsiyalar ro'yxati")
     public ResponseEntity<ApiResponse<List<InventoryDto.AuditResponse>>> getAudits(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -194,7 +207,7 @@ public class InventoryController {
     }
 
     @GetMapping("/audits/{id}")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Inventarizatsiya tafsiloti")
     public ResponseEntity<ApiResponse<InventoryDto.AuditResponse>> getAudit(
             @AuthenticationPrincipal UserPrincipal user,
@@ -203,7 +216,7 @@ public class InventoryController {
     }
 
     @PostMapping("/audits/start")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Yangi inventarizatsiya boshlash")
     public ResponseEntity<ApiResponse<InventoryDto.AuditResponse>> startAudit(
             @AuthenticationPrincipal UserPrincipal user,
@@ -214,7 +227,7 @@ public class InventoryController {
     }
 
     @PostMapping("/audits/{id}/submit")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Inventarizatsiya natijalarini tasdiqlash va stock tuzatish")
     public ResponseEntity<ApiResponse<InventoryDto.AuditResponse>> submitAudit(
             @AuthenticationPrincipal UserPrincipal user,
@@ -228,7 +241,7 @@ public class InventoryController {
     // 7. RECIPES / RETSEPTLAR
     // ==========================================
     @GetMapping("/recipes")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Taom retseptlari ro'yxati")
     public ResponseEntity<ApiResponse<List<InventoryDto.ProductRecipeResponse>>> getAllRecipes(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -236,7 +249,7 @@ public class InventoryController {
     }
 
     @GetMapping("/recipes/product/{productId}")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Muayyan taom retsepti")
     public ResponseEntity<ApiResponse<InventoryDto.ProductRecipeResponse>> getRecipe(
             @AuthenticationPrincipal UserPrincipal user,
@@ -245,7 +258,7 @@ public class InventoryController {
     }
 
     @PostMapping("/recipes")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Taom retseptini saqlash / yangilash")
     public ResponseEntity<ApiResponse<InventoryDto.ProductRecipeResponse>> saveRecipe(
             @AuthenticationPrincipal UserPrincipal user,
@@ -257,7 +270,7 @@ public class InventoryController {
     // 8. WAREHOUSES & SUPPLIERS
     // ==========================================
     @GetMapping("/warehouses")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Omborlar ro'yxati")
     public ResponseEntity<ApiResponse<List<InventoryDto.WarehouseResponse>>> getWarehouses(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -265,7 +278,7 @@ public class InventoryController {
     }
 
     @PostMapping("/warehouses")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Yangi ombor qo'shish")
     public ResponseEntity<ApiResponse<InventoryDto.WarehouseResponse>> createWarehouse(
             @AuthenticationPrincipal UserPrincipal user,
@@ -275,7 +288,7 @@ public class InventoryController {
     }
 
     @GetMapping("/suppliers")
-    @PreAuthorize("hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
+    @PreAuthorize("hasAuthority('VIEW_STOCK') or hasAuthority('INVENTORY_VIEW') or hasAuthority('VIEW_DASHBOARD')")
     @Operation(summary = "Yetkazib beruvchilar ro'yxati")
     public ResponseEntity<ApiResponse<List<InventoryDto.SupplierResponse>>> getSuppliers(
             @AuthenticationPrincipal UserPrincipal user) {
@@ -283,7 +296,7 @@ public class InventoryController {
     }
 
     @PostMapping("/suppliers")
-    @PreAuthorize("hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
+    @PreAuthorize("hasAuthority('MANAGE_STOCK') or hasAuthority('INVENTORY_MANAGE') or hasAuthority('MANAGE_PRODUCTS')")
     @Operation(summary = "Yangi yetkazib beruvchi qo'shish")
     public ResponseEntity<ApiResponse<InventoryDto.SupplierResponse>> createSupplier(
             @AuthenticationPrincipal UserPrincipal user,
