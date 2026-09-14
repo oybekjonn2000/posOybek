@@ -61,6 +61,13 @@ public class WebSocketNotificationService {
         log.debug("WS: item status for kitchen {} -> {}", kitchenId, destination);
     }
 
+    /** Yetkazib berish xizmati: yangi delivery buyurtma yoki holat o'zgardi (/topic/delivery/{tenantId}) */
+    public void notifyDeliveryOrder(UUID tenantId, Object deliveryOrder) {
+        String destination = "/topic/delivery/" + tenantId;
+        messagingTemplate.convertAndSend(destination, new WebSocketEvent("DELIVERY_ORDER_UPDATED", deliveryOrder));
+        log.debug("WS: delivery order updated -> {}", destination);
+    }
+
     /** Aniq bitta oshxonadagi taom bekor qilindi (/topic/kitchen/{kitchenId}) */
     public void notifyKitchenItemCancelled(UUID kitchenId, Object payload) {
         String destination = "/topic/kitchen/" + kitchenId;

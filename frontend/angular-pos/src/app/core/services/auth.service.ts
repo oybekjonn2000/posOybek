@@ -118,6 +118,11 @@ export class AuthService {
     return this.permissions().has(permission);
   }
 
+  hasRole(role: string): boolean {
+    const currentRole = (this._user()?.role || '').toUpperCase();
+    return currentRole === role.toUpperCase();
+  }
+
   hasAnyPermission(perms: string[]): boolean {
     if (this.isAdmin()) return true;
     return perms.some(p => this.permissions().has(p));

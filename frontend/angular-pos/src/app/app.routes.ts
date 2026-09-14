@@ -114,6 +114,12 @@ export const routes: Routes = [
         data: { permission: 'MANAGE_DEVICES', disallowRoles: ['WAITER'], title: 'Devices' }
       },
       {
+        path: 'delivery',
+        loadComponent: () => import('./delivery/delivery.component').then(m => m.DeliveryComponent),
+        canActivate: [permissionGuard],
+        data: { disallowRoles: ['KITCHEN', 'WAITER'], title: 'Delivery' }
+      },
+      {
         path: 'shifts',
         redirectTo: 'dashboard',
         pathMatch: 'full'

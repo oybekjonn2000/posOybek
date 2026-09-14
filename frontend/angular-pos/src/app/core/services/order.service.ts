@@ -60,6 +60,9 @@ export interface Order {
   readyAt?: string;
   paidAt?: string;
   closedAt?: string;
+  customerName?: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
   items: OrderItem[];
 }
 

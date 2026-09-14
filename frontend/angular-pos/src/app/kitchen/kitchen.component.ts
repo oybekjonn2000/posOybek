@@ -149,7 +149,8 @@ import { Order, OrderItem } from '../core/services/order.service';
           <!-- Card Header -->
           <div class="kds-card-header">
             <div class="table-info">
-              <span class="table-badge">{{ order.tableName || order.tableNumber || 'Stol ?' }}</span>
+              <span class="delivery-badge" *ngIf="order.orderType === 'DELIVERY'">🚚 DELIVERY</span>
+              <span class="table-badge" *ngIf="order.orderType !== 'DELIVERY'">{{ order.tableName || order.tableNumber || 'Stol ?' }}</span>
               <span class="order-num">#{{ order.orderNumber }}</span>
             </div>
             <div class="timer-badge" [class.urgent]="isUrgent(order)">
@@ -157,7 +158,13 @@ import { Order, OrderItem } from '../core/services/order.service';
             </div>
           </div>
 
-          <div class="waiter-meta" *ngIf="order.waiterName">
+          <!-- Delivery Customer Meta -->
+          <div class="delivery-kds-meta" *ngIf="order.orderType === 'DELIVERY'">
+            <span>👤 Mijoz: <strong>{{ order.customerName || 'Yetkazib berish' }}</strong> <span *ngIf="order.customerPhone">({{ order.customerPhone }})</span></span>
+            <span *ngIf="order.deliveryAddress" class="delivery-addr">📍 {{ order.deliveryAddress }}</span>
+          </div>
+
+          <div class="waiter-meta" *ngIf="order.waiterName && order.orderType !== 'DELIVERY'">
             <span>👤 Ofitsiant: <strong>{{ order.waiterName }}</strong></span>
             <span *ngIf="order.sentToKitchenAt">
               🕒 {{ formatTime(order.sentToKitchenAt) }}
@@ -598,6 +605,31 @@ import { Order, OrderItem } from '../core/services/order.service';
       font-size: 14px;
       padding: 4px 10px;
       border-radius: var(--radius-sm);
+    }
+
+    .delivery-badge {
+      background: rgba(245, 158, 11, 0.25);
+      color: #fbbf24;
+      border: 1px solid #f59e0b;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.5px;
+    }
+
+    .delivery-kds-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 6px 12px;
+      background: rgba(245, 158, 11, 0.08);
+      border-left: 3px solid #f59e0b;
+      font-size: 12px;
+      color: var(--text-secondary);
+
+      strong { color: var(--text-primary); }
+      .delivery-addr { font-size: 11px; color: var(--text-muted); }
     }
 
     .order-num {

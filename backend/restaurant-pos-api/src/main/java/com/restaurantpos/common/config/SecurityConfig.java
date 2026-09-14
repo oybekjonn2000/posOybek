@@ -47,7 +47,8 @@ public class SecurityConfig {
             "/actuator/health",
             "/actuator/info",
             "/ws/**",
-            "/uploads/**"
+            "/uploads/**",
+            "/api/delivery/webhook/**"
     };
 
     @Bean
@@ -69,6 +70,7 @@ public class SecurityConfig {
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/orders", "/api/orders/**").hasAnyRole("ADMIN", "MANAGER", "WAITER", "CASHIER")
+                        .requestMatchers("/api/delivery/**").hasAnyRole("ADMIN", "MANAGER", "CASHIER")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new org.springframework.security.web.authentication.HttpStatusEntryPoint(org.springframework.http.HttpStatus.UNAUTHORIZED))

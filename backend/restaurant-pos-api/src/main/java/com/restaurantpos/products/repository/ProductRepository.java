@@ -13,6 +13,8 @@ import java.util.UUID;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, UUID> {
 
+    List<Product> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
+
     List<Product> findByTenantIdAndDeletedAtIsNullOrderBySortOrderAscNameAsc(UUID tenantId);
 
     List<Product> findByTenantIdAndActiveTrueAndDeletedAtIsNullOrderBySortOrderAscNameAsc(UUID tenantId);

@@ -1,0 +1,991 @@
+<div class="delivery-page fade-in">
+  <!-- Top Bar -->
+  <div class="page-header">
+    <div class="header-left">
+      <div class="title-with-badge">
+        <h1 class="page-title">🚚 Yetkazib Berish Xizmatlari</h1>
+        <span class="pulse-indicator" *ngIf="orders.length > 0">
+          <span class="pulse-dot"></span>
+          {{ orders.length }} ta buyurtma
+        </span>
+      </div>
+      <p class="page-subtitle">
+        Yandex Eats, Uzum Tezkor, Glovo va tashqi delivery tizimlarini markazlashgan boshqaruvi
+      </p>
+    </div>
+
+    <div class="header-actions">
+      <button class="pos-btn pos-btn--secondary" (click)="setTab(activeTab)" [disabled]="loading">
+        <span [class.spinning]="loading">🔄</span>
+        <span>Yangilash</span>
+      </button>
+
+      <button
+        *ngIf="auth.isAdmin() || auth.hasRole('MANAGER')"
+        class="pos-btn pos-btn--primary"
+        (click)="openCreateProviderModal()">
+        <span>➕ Yangi Xizmat</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Navigation Tabs -->
+  <div class="delivery-tabs-bar">
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'orders'"
+      (click)="setTab('orders')">
+      <span>📋 Buyurtmalar</span>
+      <span class="tab-badge" *ngIf="orders.length > 0">{{ orders.length }}</span>
+    </button>
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'providers'"
+      (click)="setTab('providers')">
+      <span>🏢 Xizmatlar & API</span>
+      <span class="tab-badge info" *ngIf="providers.length > 0">{{ providers.length }}</span>
+    </button>
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'product-mapping'"
+      (click)="setTab('product-mapping')">
+      <span>🔀 Mahsulotlar Mapping</span>
+    </button>
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'category-mapping'"
+      (click)="setTab('category-mapping')">
+      <span>📂 Kategoriyalar Mapping</span>
+    </button>
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'dashboard'"
+      (click)="setTab('dashboard')">
+      <span>📊 Statistika & Daromad</span>
+    </button>
+    <button
+      class="tab-item"
+      [class.active]="activeTab === 'logs'"
+      (click)="setTab('logs')">
+      <span>📜 Integratsiya Loglari</span>
+    </button>
+  </div>
+
+  <!-- TAB 1: ORDERS -->
+  <div *ngIf="activeTab === 'orders'" class="tab-content">
+    <!-- Filter Strip -->
+    <div class="filter-strip">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input
+          type="text"
+          placeholder="Mijoz ismi, telefon, manzil yoki #ID qidirish..."
+          [(ngModel)]="orderSearchQuery"
+          (ngModelChange)="ordersPage = 0; loadOrders()"
+          class="pos-input"
+        />
+      </div>
+
+      <div class="filter-selects">
+        <select
+          class="pos-select"
+          [(ngModel)]="selectedProviderFilter"
+          (ngModelChange)="ordersPage = 0; loadOrders()">
+          <option value="">Barcha Provayderlar</option>
+          <option *ngFor="let p of providers" [value]="p.id">{{ p.name }}</option>
+        </select>
+
+        <select
+          class="pos-select"
+          [(ngModel)]="selectedStatusFilter"
+          (ngModelChange)="ordersPage = 0; loadOrders()">
+          <option value="">Barcha Statuslar</option>
+          <option value="NEW">Yangi (NEW)</option>
+          <option value="ACCEPTED">Qabul qilingan</option>
+          <option value="PREPARING">Tayyorlanmoqda</option>
+          <option value="READY">Tayyor</option>
+          <option value="COURIER_ASSIGNED">Kuryer tayinlangan</option>
+          <option value="DELIVERING">Yetkazilmoqda</option>
+          <option value="DELIVERED">Yetkazildi</option>
+          <option value="MAPPING_REQUIRED">⚠️ Mapping kerak</option>
+          <option value="CANCELLED">Bekor qilingan</option>
+          <option value="FAILED">Xatolik</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Orders Table Card -->
+    <div class="pos-card table-card">
+      <div *ngIf="loading && orders.length === 0" class="loading-state">
+        <div class="spinner"></div>
+        <p>Buyurtmalar yuklanmoqda...</p>
+      </div>
+
+      <div *ngIf="!loading && orders.length === 0" class="empty-state">
+        <div class="empty-icon">🚚</div>
+        <h3>Delivery buyurtmalar topilmadi</h3>
+        <p>Tashqi xizmatlardan buyurtma kelganda yoki webhook yuborilganda bu yerda avtomatik paydo bo'ladi.</p>
+      </div>
+
+      <div *ngIf="orders.length > 0" class="table-responsive">
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Xizmat</th>
+              <th>Tashqi #ID</th>
+              <th>Mijoz</th>
+              <th>Manzil</th>
+              <th>Tarkibi</th>
+              <th>Summa</th>
+              <th>To'lov</th>
+              <th>Status</th>
+              <th>Kuryer</th>
+              <th>Vaqt</th>
+              <th style="text-align: right;">Amallar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let o of orders" [class.highlight-row]="o.status === 'MAPPING_REQUIRED'">
+              <td>
+                <span class="provider-badge">
+                  {{ getProviderIcon(o.providerCode || '') }} {{ o.providerName || 'Delivery' }}
+                </span>
+              </td>
+              <td>
+                <span class="order-id-code">#{{ o.externalOrderId }}</span>
+                <span *ngIf="o.posOrderNumber" class="pos-order-tag">POS #{{ o.posOrderNumber }}</span>
+              </td>
+              <td>
+                <div class="customer-info">
+                  <strong>{{ o.customerName || 'Anonim' }}</strong>
+                  <span class="customer-phone" *ngIf="o.customerPhone">{{ o.customerPhone }}</span>
+                </div>
+              </td>
+              <td>
+                <div class="address-cell" [title]="o.address || 'Ko\'rsatilmagan'">
+                  📍 {{ o.address || '-' }}
+                </div>
+              </td>
+              <td>
+                <div class="items-summary" [title]="(o.items?.length || 0) + ' xil mahsulot'">
+                  <span *ngFor="let it of o.items?.slice(0, 2); let last = last">
+                    {{ it.quantity }}x {{ it.name }}<span *ngIf="!last">, </span>
+                  </span>
+                  <span *ngIf="(o.items?.length || 0) > 2" class="more-items">
+                    +{{ (o.items?.length || 0) - 2 }} ta
+                  </span>
+                </div>
+              </td>
+              <td>
+                <div class="price-cell">
+                  <strong>{{ formatPrice(o.total) }}</strong>
+                  <span class="price-sub" *ngIf="o.deliveryFee > 0">+{{ formatPrice(o.deliveryFee) }} yetkazish</span>
+                </div>
+              </td>
+              <td>
+                <span class="payment-pill" [class.online]="o.paymentType === 'ONLINE'">
+                  {{ o.paymentType || 'ONLINE' }}
+                </span>
+              </td>
+              <td>
+                <span class="status-pill" [ngClass]="getStatusBadgeClass(o.status)">
+                  {{ getStatusText(o.status) }}
+                </span>
+              </td>
+              <td>
+                <div *ngIf="o.courierName" class="courier-badge">
+                  🚴 {{ o.courierName }}
+                  <span *ngIf="o.courierPhone" class="courier-phone">{{ o.courierPhone }}</span>
+                </div>
+                <span *ngIf="!o.courierName" class="text-muted">-</span>
+              </td>
+              <td class="text-muted">{{ formatDate(o.createdAt) }}</td>
+              <td style="text-align: right;">
+                <div class="action-buttons">
+                  <button
+                    class="action-btn action-btn--view"
+                    (click)="viewOrderDetails(o)"
+                    title="Batafsil ko'rish">
+                    👁️
+                  </button>
+
+                  <!-- Map item button if mapping required -->
+                  <button
+                    *ngIf="o.status === 'MAPPING_REQUIRED'"
+                    class="action-btn action-btn--map"
+                    (click)="openMapItemModal(o, o.items![0])"
+                    title="Mahsulotni bog'lash">
+                    🔀 Bog'lash
+                  </button>
+
+                  <!-- Accept button -->
+                  <button
+                    *ngIf="o.status === 'NEW'"
+                    class="action-btn action-btn--accept"
+                    (click)="openAcceptModal(o)"
+                    title="Qabul qilish va oshxonaga yuborish">
+                    ✅ Qabul
+                  </button>
+
+                  <!-- Reject button -->
+                  <button
+                    *ngIf="o.status === 'NEW'"
+                    class="action-btn action-btn--reject"
+                    (click)="openRejectModal(o)"
+                    title="Rad etish">
+                    ❌ Rad
+                  </button>
+
+                  <!-- Cancel button for accepted/preparing orders -->
+                  <button
+                    *ngIf="o.status === 'ACCEPTED' || o.status === 'PREPARING'"
+                    class="action-btn action-btn--cancel"
+                    (click)="openCancelModal(o)"
+                    title="Bekor qilish">
+                    🚫 Bekor
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <mat-paginator
+        *ngIf="totalOrders > 0"
+        [length]="totalOrders"
+        [pageSize]="ordersSize"
+        [pageSizeOptions]="[10, 25, 50, 100]"
+        (page)="onOrderPageChange($event)"
+        class="custom-paginator">
+      </mat-paginator>
+    </div>
+  </div>
+
+  <!-- TAB 2: PROVIDERS -->
+  <div *ngIf="activeTab === 'providers'" class="tab-content">
+    <div class="providers-grid">
+      <div *ngFor="let p of providers" class="provider-card pos-card" [class.provider-connected]="p.connectionStatus === 'CONNECTED'">
+        <div class="provider-header">
+          <div class="provider-main-info">
+            <span class="provider-big-icon">{{ getProviderIcon(p.code) }}</span>
+            <div>
+              <h3 class="provider-title">{{ p.name }}</h3>
+              <span class="provider-type-tag">{{ p.type }}</span>
+            </div>
+          </div>
+          <div class="provider-status-tags">
+            <span class="connection-pill" [class.connected]="p.connectionStatus === 'CONNECTED'" [class.disconnected]="p.connectionStatus !== 'CONNECTED'">
+              {{ p.connectionStatus === 'CONNECTED' ? '● ULANGAN' : '○ UZILGAN' }}
+            </span>
+            <span class="status-pill" [class.badge--delivered]="p.status === 'ACTIVE'" [class.badge--danger]="p.status !== 'ACTIVE'">
+              {{ p.status }}
+            </span>
+          </div>
+        </div>
+
+        <div class="provider-body">
+          <div class="info-row">
+            <span class="label">API Base URL:</span>
+            <span class="value code-val">{{ p.apiBaseUrl || 'Standart rasmiy endpoint' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Restoran ID:</span>
+            <span class="value">{{ p.restaurantId || '-' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Webhook Manzili:</span>
+            <span class="value code-val">{{ p.webhookUrl }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">API Kaliti (Maskalangan):</span>
+            <span class="value code-val">{{ p.apiKeyMasked || '••••••••••••' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Komissiya:</span>
+            <span class="value highlight">
+              {{ p.commissionValue }}% ({{ p.commissionType || 'PERCENTAGE' }})
+            </span>
+          </div>
+          <div class="info-row">
+            <span class="label">Oxirgi Sinxronizatsiya:</span>
+            <span class="value">{{ formatDate(p.lastSyncAt) }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Avto qabul:</span>
+            <span class="value">{{ p.autoAcceptOrders ? 'Yoqilgan (ON)' : 'O\'chirilgan (OFF)' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Oshxona chekini avto chiqarish:</span>
+            <span class="value">{{ p.autoPrintKitchenReceipt ? 'Ha (ON)' : 'Yo\'q (OFF)' }}</span>
+          </div>
+
+          <!-- Connection result notification if tested -->
+          <div *ngIf="connectionTestResult[p.id]" class="connection-test-banner" [class.success]="connectionTestResult[p.id].success" [class.error]="!connectionTestResult[p.id].success">
+            <span class="test-icon">{{ connectionTestResult[p.id].success ? '🟢' : '🔴' }}</span>
+            <span>{{ connectionTestResult[p.id].message }}</span>
+          </div>
+        </div>
+
+        <div class="provider-footer">
+          <button
+            class="pos-btn pos-btn--sm pos-btn--secondary"
+            (click)="testConnection(p)"
+            [disabled]="testingConnectionId === p.id">
+            <span [class.spinning]="testingConnectionId === p.id">⚡</span>
+            <span>Test Connection</span>
+          </button>
+
+          <button
+            class="pos-btn pos-btn--sm"
+            [class.pos-btn--success]="p.connectionStatus !== 'CONNECTED'"
+            [class.pos-btn--danger]="p.connectionStatus === 'CONNECTED'"
+            (click)="toggleConnection(p)">
+            <span>{{ p.connectionStatus === 'CONNECTED' ? '🔌 Uzish' : '⚡ Ulash' }}</span>
+          </button>
+
+          <button
+            class="pos-btn pos-btn--sm pos-btn--secondary"
+            (click)="syncProducts(p)"
+            [disabled]="loading">
+            <span>🔄 Sync</span>
+          </button>
+
+          <button
+            *ngIf="auth.isAdmin() || auth.hasRole('MANAGER')"
+            class="pos-btn pos-btn--sm pos-btn--secondary"
+            (click)="openEditProviderModal(p)">
+            <span>⚙️ Sozlash</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: PRODUCT MAPPING -->
+  <div *ngIf="activeTab === 'product-mapping'" class="tab-content">
+    <div class="tab-header-box">
+      <div>
+        <h3>🔀 Delivery Mahsulotlari ➔ POS Menyu Bog'lanishi</h3>
+        <p>Yetkazib berish xizmatidagi mahsulotlarni restoranning POS taomlariga xaritasi</p>
+      </div>
+    </div>
+
+    <div class="pos-card table-card">
+      <div *ngIf="productMappings.length === 0" class="empty-state">
+        <div class="empty-icon">🔀</div>
+        <h3>Hozircha biriktirilgan mahsulotlar yo'q</h3>
+        <p>Buyurtma kelganda yoki Sync qilinganda bu yerda avtomatik xaritalanadi.</p>
+      </div>
+
+      <div *ngIf="productMappings.length > 0" class="table-responsive">
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Xizmat</th>
+              <th>Tashqi Mahsulot ID</th>
+              <th>Delivery Mahsulot Nomi</th>
+              <th>Tashqi Narx</th>
+              <th>➔ POS Mahsulot</th>
+              <th>POS Narxi</th>
+              <th>Turi</th>
+              <th style="text-align: right;">Amallar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let m of productMappings">
+              <td><strong>{{ m.providerName || 'Delivery' }}</strong></td>
+              <td><code>{{ m.externalProductId }}</code></td>
+              <td><strong>{{ m.externalProductName }}</strong></td>
+              <td>{{ formatPrice(m.externalProductPrice) }}</td>
+              <td>
+                <span class="linked-pos-badge">🍽️ {{ m.posProductName || 'Biriktirilgan' }}</span>
+              </td>
+              <td>{{ formatPrice(m.posProductPrice) }}</td>
+              <td>
+                <span class="badge" [class.badge--ready]="m.autoMapped" [class.badge--progress]="!m.autoMapped">
+                  {{ m.autoMapped ? 'Avto' : 'Qo\'lda' }}
+                </span>
+              </td>
+              <td style="text-align: right;">
+                <button
+                  class="action-btn action-btn--reject"
+                  (click)="deleteProductMapping(m)"
+                  title="Bog'lanishni o'chirish">
+                  🗑️
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: CATEGORY MAPPING -->
+  <div *ngIf="activeTab === 'category-mapping'" class="tab-content">
+    <div class="tab-header-box">
+      <div>
+        <h3>📂 Delivery Kategoriyalari ➔ POS Bo'limlari Bog'lanishi</h3>
+        <p>Tashqi delivery bo'limlarini oshxona va kassa kategoriyalari bilan moslashtirish</p>
+      </div>
+      <button class="pos-btn pos-btn--primary" (click)="showCategoryMapModal = true">
+        <span>➕ Kategoriya Bog'lash</span>
+      </button>
+    </div>
+
+    <div class="pos-card table-card">
+      <div *ngIf="categoryMappings.length === 0" class="empty-state">
+        <div class="empty-icon">📂</div>
+        <h3>Biriktirilgan kategoriyalar yo'q</h3>
+        <p>Yangi kategoriya mosligini qo'shish uchun yuqoridagi tugmani bosing.</p>
+      </div>
+
+      <div *ngIf="categoryMappings.length > 0" class="table-responsive">
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Xizmat</th>
+              <th>Tashqi Kategoriya ID</th>
+              <th>Delivery Kategoriya Nomi</th>
+              <th>➔ POS Kategoriya</th>
+              <th style="text-align: right;">Amallar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let cm of categoryMappings">
+              <td><strong>{{ cm.providerName || 'Delivery' }}</strong></td>
+              <td><code>{{ cm.externalCategoryId }}</code></td>
+              <td><strong>{{ cm.externalCategoryName }}</strong></td>
+              <td>
+                <span class="linked-pos-badge">📁 {{ cm.posCategoryName }}</span>
+              </td>
+              <td style="text-align: right;">
+                <button
+                  class="action-btn action-btn--reject"
+                  (click)="deleteCategoryMapping(cm)"
+                  title="O'chirish">
+                  🗑️
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: DASHBOARD -->
+  <div *ngIf="activeTab === 'dashboard'" class="tab-content">
+    <div class="metrics-grid">
+      <div class="metric-card pos-card">
+        <div class="metric-icon">📦</div>
+        <div class="metric-info">
+          <span class="metric-label">Bugungi Buyurtmalar</span>
+          <span class="metric-value">{{ dashboardMetrics?.todayOrders || 0 }} ta</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon active">⚡</div>
+        <div class="metric-info">
+          <span class="metric-label">Faol Buyurtmalar</span>
+          <span class="metric-value highlight">{{ dashboardMetrics?.activeOrders || 0 }} ta</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon success">✅</div>
+        <div class="metric-info">
+          <span class="metric-label">Yetkazildi (Muvaffaqiyatli)</span>
+          <span class="metric-value">{{ dashboardMetrics?.deliveredOrders || 0 }} ta</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon danger">🚫</div>
+        <div class="metric-info">
+          <span class="metric-label">Bekor Qilingan / Xato</span>
+          <span class="metric-value text-danger">{{ (dashboardMetrics?.cancelledOrders || 0) + (dashboardMetrics?.failedOrders || 0) }} ta</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon revenue">💰</div>
+        <div class="metric-info">
+          <span class="metric-label">Yalpi Savdo (Gross Sales)</span>
+          <span class="metric-value text-success">{{ formatPrice(dashboardMetrics?.grossSales) }}</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon fee">🛵</div>
+        <div class="metric-info">
+          <span class="metric-label">Yetkazib Berish To'lovlari</span>
+          <span class="metric-value">{{ formatPrice(dashboardMetrics?.deliveryFees) }}</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card">
+        <div class="metric-icon commission">📉</div>
+        <div class="metric-info">
+          <span class="metric-label">Xizmat Komissiyasi</span>
+          <span class="metric-value text-warning">{{ formatPrice(dashboardMetrics?.commission) }}</span>
+        </div>
+      </div>
+
+      <div class="metric-card pos-card highlight-card">
+        <div class="metric-icon net">💎</div>
+        <div class="metric-info">
+          <span class="metric-label">Sof Restoran Daromadi</span>
+          <span class="metric-value text-highlight">{{ formatPrice(dashboardMetrics?.netRevenue) }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 6: INTEGRATION LOGS -->
+  <div *ngIf="activeTab === 'logs'" class="tab-content">
+    <div class="pos-card table-card">
+      <div *ngIf="logs.length === 0" class="empty-state">
+        <div class="empty-icon">📜</div>
+        <h3>Audit loglar mavjud emas</h3>
+        <p>Delivery API so'rovlari va webhook amallari bu yerda qayd qilinadi.</p>
+      </div>
+
+      <div *ngIf="logs.length > 0" class="table-responsive">
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Xizmat</th>
+              <th>Amaliyot (Action)</th>
+              <th>Tashqi #ID</th>
+              <th>Status</th>
+              <th>Xabar / Xatolik</th>
+              <th>Bajarilish vaqti</th>
+              <th>Sana & Vaqt</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let l of logs">
+              <td><strong>{{ l.providerName || 'Umumiy' }}</strong></td>
+              <td><code>{{ l.action }}</code></td>
+              <td><code>{{ l.externalId || '-' }}</code></td>
+              <td>
+                <span class="badge" [class.badge--delivered]="l.status === 'SUCCESS'" [class.badge--danger]="l.status === 'FAILED'">
+                  {{ l.status }}
+                </span>
+              </td>
+              <td class="log-msg-cell">
+                <span [class.text-danger]="l.status === 'FAILED'">{{ l.errorMessage || 'Muvaffaqiyatli' }}</span>
+              </td>
+              <td>{{ l.durationMs ? l.durationMs + ' ms' : '-' }}</td>
+              <td class="text-muted">{{ formatDate(l.createdAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <mat-paginator
+        *ngIf="totalLogs > 0"
+        [length]="totalLogs"
+        [pageSize]="logsSize"
+        [pageSizeOptions]="[10, 25, 50, 100]"
+        (page)="onLogsPageChange($event)"
+        class="custom-paginator">
+      </mat-paginator>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+
+<!-- 1. CREATE / EDIT PROVIDER MODAL -->
+<div class="modal-overlay" *ngIf="showProviderModal" (click)="showProviderModal = false">
+  <div class="modal-content modal-lg" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">{{ isEditingProvider ? '⚙️ Xizmatni Sozlash' : '➕ Yangi Delivery Xizmat Qo\'shish' }}</h2>
+      <button class="modal-close" (click)="showProviderModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Xizmat Nomi *</label>
+          <input type="text" class="pos-input" [(ngModel)]="providerForm.name" placeholder="Masalan: Yandex Eats Samarqand" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tizim Kodi *</label>
+          <input type="text" class="pos-input" [(ngModel)]="providerForm.code" placeholder="YANDEX_EATS" [disabled]="isEditingProvider" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Provayder Turi *</label>
+          <select class="pos-select" [(ngModel)]="providerForm.type">
+            <option value="YANDEX_EATS">Yandex Eats</option>
+            <option value="UZUM_TEZKOR">Uzum Tezkor</option>
+            <option value="GLOVO">Glovo</option>
+            <option value="CUSTOM_API">Custom API</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Restoran ID (Partner ID)</label>
+          <input type="text" class="pos-input" [(ngModel)]="providerForm.restaurantId" placeholder="Provider bergan restaurantId" />
+        </div>
+
+        <div class="form-group full-width">
+          <label class="form-label">API Base URL</label>
+          <input type="text" class="pos-input" [(ngModel)]="providerForm.apiBaseUrl" placeholder="https://api.partner.yandex.ru" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">API Key / Token (Maskalangan)</label>
+          <input type="password" class="pos-input" [(ngModel)]="providerForm.apiKey" placeholder="Yangi kalit kiritish uchun yozing" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Client ID</label>
+          <input type="text" class="pos-input" [(ngModel)]="providerForm.clientId" placeholder="Client identifier" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Secret</label>
+          <input type="password" class="pos-input" [(ngModel)]="providerForm.secret" placeholder="Client secret" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Webhook Secret (HMAC verification)</label>
+          <input type="password" class="pos-input" [(ngModel)]="providerForm.webhookSecret" placeholder="Webhook imzosi uchun maxfiy kalit" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Komissiya Turi</label>
+          <select class="pos-select" [(ngModel)]="providerForm.commissionType">
+            <option value="PERCENTAGE">Foiz (%)</option>
+            <option value="FIXED">Qat'iy summa (so'm)</option>
+            <option value="PROVIDER_REPORTED">Provayder hisoboti bo'yicha</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Komissiya Qiymati</label>
+          <input type="number" class="pos-input" [(ngModel)]="providerForm.commissionValue" placeholder="15" />
+        </div>
+
+        <!-- Switches -->
+        <div class="form-group full-width switches-grid">
+          <label class="checkbox-label">
+            <input type="checkbox" [(ngModel)]="providerForm.autoAcceptOrders" />
+            <span>⚡ Buyurtmalarni avtomatik qabul qilish (Auto Accept)</span>
+          </label>
+
+          <label class="checkbox-label">
+            <input type="checkbox" [(ngModel)]="providerForm.autoPrintKitchenReceipt" />
+            <span>🖨️ Oshxona chekini avtomatik chiqarish (Auto Print Kitchen)</span>
+          </label>
+
+          <label class="checkbox-label">
+            <input type="checkbox" [(ngModel)]="providerForm.soundNotification" />
+            <span>🔔 Ovozli bildirishnoma (Sound alert)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showProviderModal = false">Bekor qilish</button>
+      <button class="pos-btn pos-btn--primary" (click)="saveProvider()" [disabled]="loading">
+        {{ isEditingProvider ? 'Saqlash' : 'Xizmatni Yaratish' }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. ORDER DETAILS MODAL -->
+<div class="modal-overlay" *ngIf="showOrderDetailsModal" (click)="showOrderDetailsModal = false">
+  <div class="modal-content modal-lg" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title-box">
+        <h2 class="modal-title">🚚 Buyurtma #{{ selectedOrder?.externalOrderId }}</h2>
+        <span class="provider-badge">{{ selectedOrder?.providerName }}</span>
+        <span class="status-pill" [ngClass]="getStatusBadgeClass(selectedOrder?.status || '')">
+          {{ getStatusText(selectedOrder?.status || '') }}
+        </span>
+      </div>
+      <button class="modal-close" (click)="showOrderDetailsModal = false">✕</button>
+    </div>
+
+    <div class="modal-body" *ngIf="selectedOrder">
+      <div class="order-details-sections">
+        <!-- Customer & Delivery Info -->
+        <div class="details-card pos-card">
+          <h4>👤 Mijoz & Manzil</h4>
+          <div class="details-row">
+            <span>Ism:</span>
+            <strong>{{ selectedOrder.customerName || 'Ko\'rsatilmagan' }}</strong>
+          </div>
+          <div class="details-row">
+            <span>Telefon:</span>
+            <strong>{{ selectedOrder.customerPhone || '-' }}</strong>
+          </div>
+          <div class="details-row">
+            <span>Yetkazish manzili:</span>
+            <strong>📍 {{ selectedOrder.address || '-' }}</strong>
+          </div>
+          <div class="details-row" *ngIf="selectedOrder.latitude && selectedOrder.longitude">
+            <span>GPS Koordinatalar:</span>
+            <code>{{ selectedOrder.latitude }}, {{ selectedOrder.longitude }}</code>
+          </div>
+        </div>
+
+        <!-- Courier & Status -->
+        <div class="details-card pos-card">
+          <h4>🚴 Kuryer & Holat</h4>
+          <div class="details-row">
+            <span>Kuryer:</span>
+            <strong>{{ selectedOrder.courierName || 'Hali biriktirilmagan' }}</strong>
+          </div>
+          <div class="details-row" *ngIf="selectedOrder.courierPhone">
+            <span>Kuryer telefoni:</span>
+            <strong>{{ selectedOrder.courierPhone }}</strong>
+          </div>
+          <div class="details-row" *ngIf="selectedOrder.courierVehicle">
+            <span>Transport turi:</span>
+            <span>{{ selectedOrder.courierVehicle }}</span>
+          </div>
+          <div class="details-row">
+            <span>POS Buyurtma Bog'lanishi:</span>
+            <strong *ngIf="selectedOrder.posOrderId" class="text-success">
+              ✅ POS #{{ selectedOrder.posOrderNumber }} ga ulandi
+            </strong>
+            <span *ngIf="!selectedOrder.posOrderId" class="text-warning">
+              ⏳ Hali POS buyurtmaga aylanmagan ({{ selectedOrder.status }})
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <div class="items-box pos-card">
+        <h4>🍽️ Buyurtma Mahsulotlari</h4>
+        <table class="pos-table">
+          <thead>
+            <tr>
+              <th>Mahsulot</th>
+              <th>Miqdor</th>
+              <th>Narx</th>
+              <th>Jami</th>
+              <th>Mapping Holati</th>
+              <th>Amallar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let it of selectedOrder.items">
+              <td>
+                <strong>{{ it.name }}</strong>
+                <div *ngIf="it.notes" class="item-note">⚠️ {{ it.notes }}</div>
+              </td>
+              <td>{{ it.quantity }}x</td>
+              <td>{{ formatPrice(it.unitPrice) }}</td>
+              <td><strong>{{ formatPrice(it.total) }}</strong></td>
+              <td>
+                <span class="badge" [class.badge--ready]="it.mappingStatus === 'MAPPED'" [class.badge--warning]="it.mappingStatus === 'UNMAPPED'">
+                  {{ it.mappingStatus === 'MAPPED' ? 'Bog\'langan' : 'Bog\'lanmagan' }}
+                </span>
+              </td>
+              <td>
+                <button
+                  *ngIf="it.mappingStatus !== 'MAPPED'"
+                  class="action-btn action-btn--map"
+                  (click)="openMapItemModal(selectedOrder, it)">
+                  🔀 Bog'lash
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Financial Breakdown -->
+      <div class="finance-breakdown pos-card">
+        <div class="finance-row">
+          <span>Taomlar qiymati (Subtotal):</span>
+          <span>{{ formatPrice(selectedOrder.subtotal) }}</span>
+        </div>
+        <div class="finance-row" *ngIf="selectedOrder.deliveryFee > 0">
+          <span>Yetkazib berish xizmati:</span>
+          <span>+{{ formatPrice(selectedOrder.deliveryFee) }}</span>
+        </div>
+        <div class="finance-row" *ngIf="selectedOrder.discount > 0">
+          <span>Chegirma:</span>
+          <span class="text-danger">-{{ formatPrice(selectedOrder.discount) }}</span>
+        </div>
+        <div class="finance-row" *ngIf="selectedOrder.commission > 0">
+          <span>Xizmat komissiyasi:</span>
+          <span class="text-warning">{{ formatPrice(selectedOrder.commission) }}</span>
+        </div>
+        <div class="finance-row total-row">
+          <span>JAMI:</span>
+          <span class="total-val">{{ formatPrice(selectedOrder.total) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showOrderDetailsModal = false">Yopish</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3. ACCEPT ORDER MODAL -->
+<div class="modal-overlay" *ngIf="showAcceptModal" (click)="showAcceptModal = false">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">✅ Buyurtmani Qabul Qilish</h2>
+      <button class="modal-close" (click)="showAcceptModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <p>Buyurtma <strong>#{{ orderToAccept?.externalOrderId }}</strong> qabul qilinadi va oshxonaga uzatiladi.</p>
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">Tayyorlanish Vaqti (Daqiqada)</label>
+        <div class="prep-quick-buttons">
+          <button class="pos-btn pos-btn--sm" [class.pos-btn--primary]="prepMinutes === 15" (click)="prepMinutes = 15">15 daqiqa</button>
+          <button class="pos-btn pos-btn--sm" [class.pos-btn--primary]="prepMinutes === 20" (click)="prepMinutes = 20">20 daqiqa</button>
+          <button class="pos-btn pos-btn--sm" [class.pos-btn--primary]="prepMinutes === 30" (click)="prepMinutes = 30">30 daqiqa</button>
+          <button class="pos-btn pos-btn--sm" [class.pos-btn--primary]="prepMinutes === 45" (click)="prepMinutes = 45">45 daqiqa</button>
+        </div>
+        <input type="number" class="pos-input" style="margin-top: 8px;" [(ngModel)]="prepMinutes" />
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showAcceptModal = false">Bekor qilish</button>
+      <button class="pos-btn pos-btn--primary" (click)="confirmAcceptOrder()">Qabul Qilish & Oshxonaga Yuborish</button>
+    </div>
+  </div>
+</div>
+
+<!-- 4. REJECT MODAL -->
+<div class="modal-overlay" *ngIf="showRejectModal" (click)="showRejectModal = false">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">❌ Buyurtmani Rad Etish</h2>
+      <button class="modal-close" (click)="showRejectModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Rad Etish Sababi</label>
+        <input type="text" class="pos-input" [(ngModel)]="rejectReason" placeholder="Masalan: Mahsulot tugagan, Oshxona band" />
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showRejectModal = false">Bekor qilish</button>
+      <button class="pos-btn pos-btn--danger" (click)="confirmRejectOrder()">Rad Etish</button>
+    </div>
+  </div>
+</div>
+
+<!-- 5. CANCEL MODAL -->
+<div class="modal-overlay" *ngIf="showCancelModal" (click)="showCancelModal = false">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">🚫 Buyurtmani Bekor Qilish</h2>
+      <button class="modal-close" (click)="showCancelModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Bekor Qilish Sababi</label>
+        <input type="text" class="pos-input" [(ngModel)]="cancelReason" placeholder="Mijoz bekor qildi" />
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showCancelModal = false">Ortga</button>
+      <button class="pos-btn pos-btn--danger" (click)="confirmCancelOrder()">Bekor Qilish</button>
+    </div>
+  </div>
+</div>
+
+<!-- 6. MAP ITEM MODAL -->
+<div class="modal-overlay" *ngIf="showMapItemModal" (click)="showMapItemModal = false">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">🔀 Delivery Mahsulotini POS Taomiga Bog'lash</h2>
+      <button class="modal-close" (click)="showMapItemModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="unmapped-info pos-card">
+        <span class="label">Tashqi Mahsulot Nomi:</span>
+        <strong class="highlight-val">{{ itemToMap?.name }}</strong>
+        <span class="sub-label">Tashqi ID: <code>{{ itemToMap?.externalProductId }}</code></span>
+      </div>
+
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="form-label">Mos POS Taomini Tanlang *</label>
+        <select class="pos-select" [(ngModel)]="selectedPosProductId">
+          <option value="">-- POS menyusidan tanlang --</option>
+          <option *ngFor="let p of posProducts" [value]="p.id">
+            {{ p.name }} ({{ formatPrice(p.salePrice) }})
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showMapItemModal = false">Bekor qilish</button>
+      <button class="pos-btn pos-btn--primary" (click)="confirmMapItem()" [disabled]="!selectedPosProductId">
+        Bog'lash va Buyurtmani Qayta Ishlash
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 7. CATEGORY MAP MODAL -->
+<div class="modal-overlay" *ngIf="showCategoryMapModal" (click)="showCategoryMapModal = false">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2 class="modal-title">📂 Yangi Kategoriya Bog'lash</h2>
+      <button class="modal-close" (click)="showCategoryMapModal = false">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Xizmat *</label>
+        <select class="pos-select" [(ngModel)]="categoryMapForm.providerId">
+          <option value="">-- Xizmatni tanlang --</option>
+          <option *ngFor="let p of providers" [value]="p.id">{{ p.name }}</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Tashqi Kategoriya ID *</label>
+        <input type="text" class="pos-input" [(ngModel)]="categoryMapForm.externalCategoryId" placeholder="cat_pizza_1" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Tashqi Kategoriya Nomi *</label>
+        <input type="text" class="pos-input" [(ngModel)]="categoryMapForm.externalCategoryName" placeholder="Pizza & Fastfood" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">POS Kategoriyasi *</label>
+        <select class="pos-select" [(ngModel)]="categoryMapForm.posCategoryId">
+          <option value="">-- POS bo'limini tanlang --</option>
+          <option *ngFor="let c of posCategories" [value]="c.id">{{ c.name }}</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pos-btn pos-btn--secondary" (click)="showCategoryMapModal = false">Bekor qilish</button>
+      <button class="pos-btn pos-btn--primary" (click)="saveCategoryMapping()">Saqlash</button>
+    </div>
+  </div>
+</div>

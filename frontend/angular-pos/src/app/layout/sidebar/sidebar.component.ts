@@ -219,6 +219,7 @@ export class SidebarComponent {
     { icon: '🖥️', label: 'Kassa (POS)', route: '/pos', permission: 'CREATE_ORDER' },
     { icon: '🪑', label: 'Stollar', route: '/tables' },
     { icon: '📋', label: 'Buyurtmalar', route: '/orders' },
+    { icon: '🚚', label: 'Yetkazib berish', route: '/delivery', disallowRoles: ['KITCHEN', 'WAITER'] },
     { icon: '👨‍🍳', label: 'Oshxona', route: '/kitchen', permission: 'KITCHEN_VIEW' },
     { icon: '🍔', label: 'Mahsulotlar', route: '/products', permission: 'MANAGE_PRODUCTS' },
     { icon: '📁', label: 'Kategoriyalar', route: '/categories', permission: 'MANAGE_CATEGORIES' },
