@@ -143,6 +143,18 @@ public class KitchenController {
         return ResponseEntity.ok(ApiResponse.success(categories));
     }
 
+    @PostMapping("/api/kitchens/{id}/categories")
+    @PreAuthorize("hasAuthority('MANAGE_SETTINGS') or hasAuthority('MANAGE_PRODUCTS') or hasRole('ADMIN') or hasRole('MANAGER')")
+    @Operation(summary = "Assign multiple categories to a kitchen station (1 Category → 1 Kitchen rule enforced)")
+    public ResponseEntity<ApiResponse<KitchenDto.AssignCategoriesResponse>> assignKitchenCategories(
+            @PathVariable UUID id,
+            @RequestBody KitchenDto.AssignCategoriesRequest request,
+            @AuthenticationPrincipal UserPrincipal user) {
+        KitchenDto.AssignCategoriesResponse result = kitchenService.assignCategoriesToKitchen(user.getTenantId(), id, request);
+        String msg = result.getMessage();
+        return ResponseEntity.ok(ApiResponse.success(result, msg));
+    }
+
     @DeleteMapping("/api/kitchens/{id}")
     @PreAuthorize("hasAuthority('MANAGE_SETTINGS') or hasAuthority('MANAGE_PRODUCTS') or hasRole('ADMIN') or hasRole('MANAGER')")
     @Operation(summary = "Delete kitchen station with category and product count guard")

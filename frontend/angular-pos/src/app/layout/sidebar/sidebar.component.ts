@@ -242,12 +242,12 @@ export class SidebarComponent {
       if (item.disallowRoles && item.disallowRoles.includes(role)) {
         return false;
       }
-      // Kitchen user must NOT see Orders, POS, Tables, Dashboard, etc.
+      // Kitchen user must ONLY see /kitchen
       if (role === 'KITCHEN' && item.route !== '/kitchen') {
         return false;
       }
-      // Waiter user must NOT see Kitchen
-      if (role === 'WAITER' && item.route === '/kitchen') {
+      // Waiter user must ONLY see /tables
+      if (role === 'WAITER' && item.route !== '/tables') {
         return false;
       }
       if (this.auth.isAdmin()) {

@@ -44,6 +44,10 @@ import { ConnectionService } from '../../core/services/connection.service';
     </header>
   `,
   styles: [`
+    :host-context(.no-sidebar) .topbar {
+      left: 0 !important;
+    }
+
     .topbar {
       position: fixed;
       top: 0;

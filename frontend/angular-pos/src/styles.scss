@@ -147,6 +147,15 @@ body {
   display: flex;
   height: 100vh;
   overflow: hidden;
+
+  &.no-sidebar {
+    --sidebar-width: 0px;
+    --sidebar-collapsed-width: 0px;
+
+    .topbar {
+      left: 0 !important;
+    }
+  }
 }
 
 .pos-content {
@@ -162,6 +171,10 @@ body {
 
   &.sidebar-collapsed {
     margin-left: var(--sidebar-collapsed-width);
+  }
+
+  &.no-sidebar {
+    margin-left: 0 !important;
   }
 }
 

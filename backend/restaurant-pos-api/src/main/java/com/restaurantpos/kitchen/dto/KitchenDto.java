@@ -54,6 +54,8 @@ public class KitchenDto {
         private Boolean soundNotification = true;
         private Integer preparationTimeMinutes = 15;
         private UUID printerId;
+        /** Category IDs to assign/link to this kitchen on creation */
+        private List<UUID> categoryIds;
     }
 
     @Data
@@ -71,6 +73,8 @@ public class KitchenDto {
         private Boolean soundNotification;
         private Integer preparationTimeMinutes;
         private UUID printerId;
+        /** Category IDs to assign/link to this kitchen on update */
+        private List<UUID> categoryIds;
     }
 
     @Data
@@ -78,6 +82,32 @@ public class KitchenDto {
     @AllArgsConstructor
     public static class AssignEmployeesRequest {
         private List<UUID> employeeIds;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssignCategoriesRequest {
+        /** List of category IDs to assign to a kitchen (replaces current assignment) */
+        private List<UUID> categoryIds;
+        /**
+         * If true, categories already belonging to a different kitchen will be forcibly
+         * re-assigned (with a conflict warning logged). If false (default), conflicting
+         * categories are skipped and reported back.
+         */
+        private boolean forceReassign = false;
+    }
+
+    /** Payload returned when some categories could not be assigned due to conflicts */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssignCategoriesResponse {
+        private int assignedCount;
+        private int conflictCount;
+        private List<String> conflictingCategoryNames;
+        private String message;
     }
 
     @Data

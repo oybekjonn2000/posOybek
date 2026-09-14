@@ -146,6 +146,12 @@ public class KitchenService {
             assignKitchenPrinter(tenant, saved, request.getPrinterId());
         }
 
+        // Assign categories if provided (forceReassign=true because admin is explicitly creating a kitchen with categories)
+        if (request.getCategoryIds() != null && !request.getCategoryIds().isEmpty()) {
+            assignCategoriesToKitchen(tenantId, saved.getId(),
+                    new com.restaurantpos.kitchen.dto.KitchenDto.AssignCategoriesRequest(request.getCategoryIds(), true));
+        }
+
         return getKitchenById(tenantId, saved.getId());
     }
 
@@ -184,6 +190,12 @@ public class KitchenService {
 
         if (request.getPrinterId() != null) {
             assignKitchenPrinter(tenant, saved, request.getPrinterId());
+        }
+
+        // Update category assignments if provided (null = don't change; empty list = remove all)
+        if (request.getCategoryIds() != null) {
+            assignCategoriesToKitchen(tenantId, saved.getId(),
+                    new com.restaurantpos.kitchen.dto.KitchenDto.AssignCategoriesRequest(request.getCategoryIds(), true));
         }
 
         return getKitchenById(tenantId, saved.getId());
@@ -470,6 +482,59 @@ public class KitchenService {
         Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
                 .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
         return categoryService.getAllCategories(tenantId, false, kitchen.getId());
+    }
+
+    /**
+     * Assign a list of categories to the given kitchen.
+     * Business rule: 1 Category → FAQAT 1 Kitchen.
+     * - If forceReassign=true:  categories already in another kitchen are MOVED here.
+     * - If forceReassign=false: conflicting categories are SKIPPED and returned in the response.
+     */
+    @Transactional
+    public com.restaurantpos.kitchen.dto.KitchenDto.AssignCategoriesResponse assignCategoriesToKitchen(
+            UUID tenantId, UUID kitchenId,
+            com.restaurantpos.kitchen.dto.KitchenDto.AssignCategoriesRequest request) {
+
+        Kitchen kitchen = kitchenRepository.findByIdAndTenantIdAndDeletedAtIsNull(kitchenId, tenantId)
+                .orElseThrow(() -> PosException.notFound("Oshxona topilmadi: " + kitchenId));
+
+        List<UUID> requestedIds = request.getCategoryIds() != null ? request.getCategoryIds() : java.util.Collections.emptyList();
+
+        // Fetch all requested categories that belong to this tenant
+        List<com.restaurantpos.products.entity.Category> requestedCategories =
+                categoryRepository.findByTenantIdAndIdInAndDeletedAtIsNull(tenantId, requestedIds);
+
+        List<String> conflictNames = new java.util.ArrayList<>();
+        int assignedCount = 0;
+
+        for (com.restaurantpos.products.entity.Category cat : requestedCategories) {
+            boolean belongsToAnotherKitchen = cat.getKitchen() != null
+                    && !cat.getKitchen().getId().equals(kitchenId);
+
+            if (belongsToAnotherKitchen && !request.isForceReassign()) {
+                // Skip conflicting category — report back to caller
+                conflictNames.add(cat.getName() + " (hozir: " + cat.getKitchen().getName() + ")");
+            } else {
+                // Assign (or re-assign) this category to the target kitchen
+                cat.setKitchen(kitchen);
+                categoryRepository.save(cat);
+                assignedCount++;
+            }
+        }
+
+        String message;
+        if (conflictNames.isEmpty()) {
+            message = assignedCount + " ta kategoriya muvaffaqiyatli biriktirildi";
+        } else {
+            message = assignedCount + " ta kategoriya biriktirildi, " + conflictNames.size() + " ta kategoriya allaqachon boshqa oshxonaga tegishli (o'tkazilmadi)";
+        }
+
+        return com.restaurantpos.kitchen.dto.KitchenDto.AssignCategoriesResponse.builder()
+                .assignedCount(assignedCount)
+                .conflictCount(conflictNames.size())
+                .conflictingCategoryNames(conflictNames)
+                .message(message)
+                .build();
     }
 
     @Transactional

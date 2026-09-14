@@ -40,18 +40,23 @@ export interface PosCartItem {
       <div class="pos-menu">
         <!-- Top Search and Table selector bar -->
         <div class="pos-toolbar">
-          <div class="table-badge">
-            <span class="table-badge__icon">🪑</span>
-            @if (selectedTable()) {
-              <div class="table-badge__info">
-                <strong>{{ selectedTable()?.name }}</strong> (#{{ selectedTable()?.tableNumber }})
-              </div>
-              <button class="btn-change-table" (click)="onLeaveTable()">O'zgartirish</button>
-            } @else {
-              <button class="btn-select-table" (click)="router.navigate(['/tables'])">
-                Stol tanlang ➜
-              </button>
-            }
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button class="btn-change-table" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 13px;" (click)="onLeaveTable()" title="Stollar xaritasiga qaytish">
+              ⬅ Stollar
+            </button>
+            <div class="table-badge">
+              <span class="table-badge__icon">🪑</span>
+              @if (selectedTable()) {
+                <div class="table-badge__info">
+                  <strong>{{ selectedTable()?.name }}</strong> (#{{ selectedTable()?.tableNumber }})
+                </div>
+                <button class="btn-change-table" (click)="onLeaveTable()">O'zgartirish</button>
+              } @else {
+                <button class="btn-select-table" (click)="router.navigate(['/tables'])">
+                  Stol tanlang ➜
+                </button>
+              }
+            </div>
           </div>
 
           <div class="search-box">

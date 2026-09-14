@@ -36,6 +36,8 @@ export interface CreateKitchenRequest {
   soundNotification?: boolean;
   preparationTimeMinutes?: number;
   printerId?: string;
+  /** Category UUIDs to assign to this kitchen on creation */
+  categoryIds?: string[];
 }
 
 export interface UpdateKitchenRequest {
@@ -49,6 +51,8 @@ export interface UpdateKitchenRequest {
   soundNotification?: boolean;
   preparationTimeMinutes?: number;
   printerId?: string;
+  /** Category UUIDs to assign to this kitchen on update (null = no change; [] = remove all) */
+  categoryIds?: string[] | null;
 }
 
 export interface AssignedEmployee {
@@ -66,6 +70,20 @@ export interface AssignedCategory {
   nameUz?: string;
   nameRu?: string;
   active: boolean;
+  kitchenId?: string;
+  kitchenName?: string;
+}
+
+export interface AssignCategoriesRequest {
+  categoryIds: string[];
+  forceReassign?: boolean;
+}
+
+export interface AssignCategoriesResponse {
+  assignedCount: number;
+  conflictCount: number;
+  conflictingCategoryNames: string[];
+  message: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -113,6 +131,15 @@ export class KitchenService {
 
   getKitchenCategories(id: string): Observable<ApiResponse<AssignedCategory[]>> {
     return this.http.get<ApiResponse<AssignedCategory[]>>(`${environment.apiUrl}/kitchens/${id}/categories`);
+  }
+
+  assignKitchenCategories(id: string, request: AssignCategoriesRequest): Observable<ApiResponse<AssignCategoriesResponse>> {
+    return this.http.post<ApiResponse<AssignCategoriesResponse>>(`${environment.apiUrl}/kitchens/${id}/categories`, request);
+  }
+
+  /** Fetch ALL non-deleted categories across all kitchens for use in assignment dropdowns */
+  getAllCategoriesForAssignment(): Observable<ApiResponse<AssignedCategory[]>> {
+    return this.http.get<ApiResponse<AssignedCategory[]>>(`${environment.apiUrl}/categories`);
   }
 
   getKitchenOrders(kitchenId?: string): Observable<ApiResponse<Order[]>> {

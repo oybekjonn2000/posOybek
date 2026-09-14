@@ -333,6 +333,51 @@ import { NotificationService } from '../../core/services/notification.service';
               </select>
             </div>
 
+            <!-- Category Assignment Section -->
+            <div class="form-group">
+              <label class="form-label">
+                Kategoriyalar
+                <span class="cat-count-badge" *ngIf="selectedCategoryIds.size > 0">{{ selectedCategoryIds.size }} tanlangan</span>
+              </label>
+              <p class="form-hint">Ushbu oshxonaga qaysi kategoriyalar biriktirish kerakligini tanlang. Bir kategoriya faqat bitta oshxonaga tegishli bo'lishi mumkin.</p>
+
+              <div *ngIf="loadingAllCats" class="cats-loading">
+                <span class="mini-spinner"></span>
+                <span>Kategoriyalar yuklanmoqda...</span>
+              </div>
+
+              <div *ngIf="!loadingAllCats && allCategories.length === 0" class="cats-empty">
+                Hozircha kategoriyalar mavjud emas
+              </div>
+
+              <div *ngIf="!loadingAllCats && allCategories.length > 0" class="category-assign-list">
+                <label
+                  *ngFor="let cat of allCategories"
+                  class="cat-assign-card"
+                  [class.selected]="selectedCategoryIds.has(cat.id)"
+                  [class.conflict]="cat.kitchenId && cat.kitchenId !== editingId && !selectedCategoryIds.has(cat.id)">
+                  <input
+                    type="checkbox"
+                    [checked]="selectedCategoryIds.has(cat.id)"
+                    (change)="toggleCategorySelection(cat.id)"
+                  />
+                  <div class="cat-assign-info">
+                    <span class="cat-assign-name">{{ cat.name }}</span>
+                    <span *ngIf="cat.kitchenName && cat.kitchenId !== editingId" class="cat-kitchen-hint conflict-hint">
+                      ⚠️ Hozir: {{ cat.kitchenName }}
+                    </span>
+                    <span *ngIf="cat.kitchenId === editingId || (!cat.kitchenId && isEditing)" class="cat-kitchen-hint current-hint">
+                      ✓ Bu oshxonada
+                    </span>
+                    <span *ngIf="!cat.kitchenId && !isEditing" class="cat-kitchen-hint free-hint">
+                      Biriktirilmagan
+                    </span>
+                  </div>
+                  <span class="cat-status-dot" [class.active]="cat.active" [class.inactive]="!cat.active"></span>
+                </label>
+              </div>
+            </div>
+
             <!-- Options: Active, Auto-Print, Sound -->
             <div class="options-group">
               <label class="checkbox-card" [class.checked]="formData.active">
@@ -1136,6 +1181,140 @@ import { NotificationService } from '../../core/services/notification.service';
       }
     }
 
+    /* Category assignment form section styles */
+    .form-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin: 2px 0 8px;
+      line-height: 1.4;
+    }
+
+    .cat-count-badge {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 8px;
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--primary);
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .cats-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 8px 0;
+    }
+
+    .cats-empty {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 8px 0;
+      text-align: center;
+    }
+
+    .mini-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .category-assign-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 250px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .cat-assign-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+
+      &:hover {
+        border-color: var(--border-light);
+        background: var(--bg-hover);
+      }
+
+      &.selected {
+        border-color: rgba(99, 102, 241, 0.5);
+        background: rgba(99, 102, 241, 0.07);
+      }
+
+      &.conflict:not(.selected) {
+        border-color: rgba(245, 158, 11, 0.3);
+        background: rgba(245, 158, 11, 0.04);
+      }
+
+      input[type="checkbox"] {
+        accent-color: var(--primary);
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+      }
+    }
+
+    .cat-assign-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+    }
+
+    .cat-assign-name {
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .cat-kitchen-hint {
+      font-size: 10px;
+      line-height: 1.3;
+
+      &.conflict-hint {
+        color: #d97706;
+      }
+
+      &.current-hint {
+        color: #10b981;
+      }
+
+      &.free-hint {
+        color: var(--text-muted);
+      }
+    }
+
+    .cat-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+
+      &.active {
+        background: #10b981;
+      }
+
+      &.inactive {
+        background: #94a3b8;
+      }
+    }
+
     .modal-footer {
       padding: 14px 20px;
       background: var(--bg-tertiary);
@@ -1402,6 +1581,12 @@ export class KitchenManagementComponent implements OnInit {
   assignedCategories: AssignedCategory[] = [];
   loadingCatsList = false;
 
+  // All categories for form assignment
+  allCategories: AssignedCategory[] = [];
+  loadingAllCats = false;
+  /** Category IDs selected in the create/edit form for assignment */
+  selectedCategoryIds = new Set<string>();
+
   // Delete Modal State
   showDeleteModal = false;
   targetKitchenForDelete: KitchenStation | null = null;
@@ -1419,6 +1604,22 @@ export class KitchenManagementComponent implements OnInit {
     this.loadData();
     this.loadPrinters();
     this.loadStaff();
+    this.loadAllCategories();
+  }
+
+  loadAllCategories(): void {
+    this.loadingAllCats = true;
+    this.kitchenService.getAllCategoriesForAssignment().subscribe({
+      next: (res) => {
+        this.allCategories = res.data || [];
+        this.loadingAllCats = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.loadingAllCats = false;
+        this.cdr.markForCheck();
+      }
+    });
   }
 
   loadData(): void {
@@ -1517,6 +1718,7 @@ export class KitchenManagementComponent implements OnInit {
     this.isEditing = false;
     this.editingId = null;
     this.nameError = '';
+    this.selectedCategoryIds.clear();
     this.formData = {
       name: '',
       code: '',
@@ -1528,6 +1730,8 @@ export class KitchenManagementComponent implements OnInit {
       preparationTimeMinutes: 15,
       printerId: null
     };
+    // Reload categories to get fresh kitchenId info
+    this.loadAllCategories();
     this.showFormModal = true;
     this.cdr.markForCheck();
   }
@@ -1536,6 +1740,7 @@ export class KitchenManagementComponent implements OnInit {
     this.isEditing = true;
     this.editingId = kitchen.id;
     this.nameError = '';
+    this.selectedCategoryIds.clear();
     this.formData = {
       name: kitchen.name,
       code: kitchen.code,
@@ -1547,6 +1752,24 @@ export class KitchenManagementComponent implements OnInit {
       preparationTimeMinutes: kitchen.preparationTimeMinutes || 15,
       printerId: kitchen.printerId || null
     };
+    // Load categories and pre-select those belonging to this kitchen
+    this.loadingAllCats = true;
+    this.kitchenService.getAllCategoriesForAssignment().subscribe({
+      next: (res) => {
+        this.allCategories = res.data || [];
+        // Pre-select categories currently assigned to this kitchen
+        this.selectedCategoryIds.clear();
+        this.allCategories
+          .filter(cat => cat.kitchenId === kitchen.id)
+          .forEach(cat => this.selectedCategoryIds.add(cat.id));
+        this.loadingAllCats = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.loadingAllCats = false;
+        this.cdr.markForCheck();
+      }
+    });
     this.showFormModal = true;
     this.cdr.markForCheck();
   }
@@ -1556,6 +1779,7 @@ export class KitchenManagementComponent implements OnInit {
     this.isEditing = false;
     this.editingId = null;
     this.nameError = '';
+    this.selectedCategoryIds.clear();
     this.cdr.markForCheck();
   }
 
@@ -1597,6 +1821,8 @@ export class KitchenManagementComponent implements OnInit {
     this.saving = true;
     this.cdr.markForCheck();
 
+    const categoryIds = Array.from(this.selectedCategoryIds);
+
     if (this.isEditing && this.editingId) {
       const updateReq: UpdateKitchenRequest = {
         name: trimmedName,
@@ -1607,15 +1833,22 @@ export class KitchenManagementComponent implements OnInit {
         autoPrint: this.formData.autoPrint,
         soundNotification: this.formData.soundNotification,
         preparationTimeMinutes: this.formData.preparationTimeMinutes,
-        printerId: this.formData.printerId || undefined
+        printerId: this.formData.printerId || undefined,
+        categoryIds: categoryIds
       };
 
       this.kitchenService.updateKitchen(this.editingId, updateReq).subscribe({
         next: (res) => {
           this.saving = false;
-          this.notify.success(res.message || 'Oshxona muvaffaqiyatli yangilandi');
+          const conflicts = (res.data as any)?.conflictingCategoryNames;
+          if (conflicts && conflicts.length > 0) {
+            this.notify.error(`Konflikt: ${conflicts.join(', ')} boshqa oshxonada. Gaplashuv bilan o'tkazilmadi.`, 6000);
+          } else {
+            this.notify.success(res.message || 'Oshxona muvaffaqiyatli yangilandi');
+          }
           this.closeFormModal();
           this.loadData();
+          this.loadAllCategories();
         },
         error: (err) => {
           this.saving = false;
@@ -1634,7 +1867,8 @@ export class KitchenManagementComponent implements OnInit {
         autoPrint: this.formData.autoPrint,
         soundNotification: this.formData.soundNotification,
         preparationTimeMinutes: this.formData.preparationTimeMinutes,
-        printerId: this.formData.printerId || undefined
+        printerId: this.formData.printerId || undefined,
+        categoryIds: categoryIds.length > 0 ? categoryIds : undefined
       };
 
       this.kitchenService.createKitchen(createReq).subscribe({
@@ -1643,6 +1877,7 @@ export class KitchenManagementComponent implements OnInit {
           this.notify.success(res.message || 'Yangi oshxona muvaffaqiyatli yaratildi');
           this.closeFormModal();
           this.loadData();
+          this.loadAllCategories();
         },
         error: (err) => {
           this.saving = false;
@@ -1705,6 +1940,14 @@ export class KitchenManagementComponent implements OnInit {
       this.selectedEmployeeIds.delete(empId);
     } else {
       this.selectedEmployeeIds.add(empId);
+    }
+  }
+
+  toggleCategorySelection(catId: string): void {
+    if (this.selectedCategoryIds.has(catId)) {
+      this.selectedCategoryIds.delete(catId);
+    } else {
+      this.selectedCategoryIds.add(catId);
     }
   }
 

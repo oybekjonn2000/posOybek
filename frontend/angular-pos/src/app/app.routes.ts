@@ -27,7 +27,8 @@ export const routes: Routes = [
       {
         path: 'dashboard',
         loadComponent: () => import('./dashboard/dashboard.component').then(m => m.DashboardComponent),
-        data: { permission: 'VIEW_DASHBOARD', title: 'Dashboard' }
+        canActivate: [permissionGuard],
+        data: { permission: 'VIEW_DASHBOARD', disallowRoles: ['WAITER'], title: 'Dashboard' }
       },
       {
         path: 'pos',
@@ -57,19 +58,19 @@ export const routes: Routes = [
         path: 'orders',
         loadComponent: () => import('./orders/orders-list/orders-list.component').then(m => m.OrdersListComponent),
         canActivate: [permissionGuard],
-        data: { disallowRoles: ['KITCHEN'], title: 'Orders' }
+        data: { disallowRoles: ['KITCHEN', 'WAITER'], title: 'Orders' }
       },
       {
         path: 'products',
         loadComponent: () => import('./products/products.component').then(m => m.ProductsComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'MANAGE_PRODUCTS', title: 'Products' }
+        data: { permission: 'MANAGE_PRODUCTS', disallowRoles: ['WAITER'], title: 'Products' }
       },
       {
         path: 'categories',
         loadComponent: () => import('./categories/categories.component').then(m => m.CategoriesComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'MANAGE_CATEGORIES', title: 'Categories' }
+        data: { permission: 'MANAGE_CATEGORIES', disallowRoles: ['WAITER'], title: 'Categories' }
       },
       // Ombor moduli vaqtinchalik disable qilingan:
       // {
@@ -92,25 +93,25 @@ export const routes: Routes = [
         path: 'employees',
         loadComponent: () => import('./employees/employees.component').then(m => m.EmployeesComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'MANAGE_USERS', title: 'Employees' }
+        data: { permission: 'MANAGE_USERS', disallowRoles: ['WAITER'], title: 'Employees' }
       },
       {
         path: 'reports',
         loadChildren: () => import('./reports/reports.routes').then(m => m.REPORTS_ROUTES),
         canActivate: [permissionGuard],
-        data: { permission: 'VIEW_REPORTS', title: 'Reports' }
+        data: { permission: 'VIEW_REPORTS', disallowRoles: ['WAITER'], title: 'Reports' }
       },
       {
         path: 'settings',
         loadChildren: () => import('./settings/settings.routes').then(m => m.SETTINGS_ROUTES),
         canActivate: [permissionGuard],
-        data: { permission: 'MANAGE_SETTINGS', title: 'Settings' }
+        data: { permission: 'MANAGE_SETTINGS', disallowRoles: ['WAITER'], title: 'Settings' }
       },
       {
         path: 'devices',
         loadComponent: () => import('./devices/devices.component').then(m => m.DevicesComponent),
         canActivate: [permissionGuard],
-        data: { permission: 'MANAGE_DEVICES', title: 'Devices' }
+        data: { permission: 'MANAGE_DEVICES', disallowRoles: ['WAITER'], title: 'Devices' }
       },
       {
         path: 'shifts',

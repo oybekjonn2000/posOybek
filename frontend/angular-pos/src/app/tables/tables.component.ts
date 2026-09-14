@@ -13,41 +13,43 @@ import { WebsocketService } from '../core/services/websocket.service';
   imports: [CommonModule, FormsModule],
   template: `
     <div class="tables-page fade-in">
-      <!-- Header -->
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">Stollar Xaritasi</h1>
-          <p class="page-subtitle">Restoran stollari va ularning real holati (Band / Bo'sh)</p>
-        </div>
-        <div class="header-actions">
-          <button class="btn btn--secondary" (click)="loadAll()">
-            <span>🔄</span> Yangilash
-          </button>
-          @if (canManageTables()) {
-            <button class="btn btn--primary" (click)="openAddModal()">
-              <span>➕</span> Stol Qo'shish
+      @if (!isWaiter()) {
+        <!-- Header -->
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Stollar Xaritasi</h1>
+            <p class="page-subtitle">Restoran stollari va ularning real holati (Band / Bo'sh)</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn--secondary" (click)="loadAll()">
+              <span>🔄</span> Yangilash
             </button>
-          }
+            @if (canManageTables()) {
+              <button class="btn btn--primary" (click)="openAddModal()">
+                <span>➕</span> Stol Qo'shish
+              </button>
+            }
+          </div>
         </div>
-      </div>
 
-      <!-- Stats Summary -->
-      <div class="tables-stats">
-        <div class="stat-pill stat-pill--total">
-          <span class="stat-label">Jami Stollar:</span>
-          <span class="stat-value">{{ tables().length }}</span>
+        <!-- Stats Summary -->
+        <div class="tables-stats">
+          <div class="stat-pill stat-pill--total">
+            <span class="stat-label">Jami Stollar:</span>
+            <span class="stat-value">{{ tables().length }}</span>
+          </div>
+          <div class="stat-pill stat-pill--free">
+            <span class="stat-indicator"></span>
+            <span class="stat-label">Bo'sh (FREE):</span>
+            <span class="stat-value">{{ freeCount() }}</span>
+          </div>
+          <div class="stat-pill stat-pill--occupied">
+            <span class="stat-indicator"></span>
+            <span class="stat-label">Band (OCCUPIED):</span>
+            <span class="stat-value">{{ occupiedCount() }}</span>
+          </div>
         </div>
-        <div class="stat-pill stat-pill--free">
-          <span class="stat-indicator"></span>
-          <span class="stat-label">Bo'sh (FREE):</span>
-          <span class="stat-value">{{ freeCount() }}</span>
-        </div>
-        <div class="stat-pill stat-pill--occupied">
-          <span class="stat-indicator"></span>
-          <span class="stat-label">Band (OCCUPIED):</span>
-          <span class="stat-value">{{ occupiedCount() }}</span>
-        </div>
-      </div>
+      }
 
       <!-- Zone Filter Tabs -->
       <div class="zone-filter-bar">
@@ -163,7 +165,7 @@ import { WebsocketService } from '../core/services/websocket.service';
       }
 
       <!-- Add Table Modal -->
-      @if (showAddModal()) {
+      @if (showAddModal() && canManageTables()) {
         <div class="modal-backdrop" (click)="closeModal()">
           <div class="modal-card" (click)="$event.stopPropagation()">
             <div class="modal-header">
@@ -738,6 +740,8 @@ export class TablesComponent implements OnInit, OnDestroy {
   freeCount = () => this.tables().filter(t => t.status === 'FREE').length;
   occupiedCount = () => this.tables().filter(t => t.status === 'OCCUPIED').length;
 
+  isWaiter = computed(() => this.auth.isWaiter());
+
   filteredTables = computed(() => {
     const zoneId = this.selectedZoneId();
     if (!zoneId) return this.tables();
@@ -842,7 +846,7 @@ export class TablesComponent implements OnInit, OnDestroy {
   }
 
   canManageTables(): boolean {
-    return this.auth.hasPermission('MANAGE_TABLES');
+    return !this.isWaiter() && this.auth.hasPermission('MANAGE_TABLES');
   }
 
   onSelectTable(table: RestaurantTable): void {
@@ -890,6 +894,7 @@ export class TablesComponent implements OnInit, OnDestroy {
   }
 
   openAddModal(): void {
+    if (this.isWaiter()) return;
     const defaultZone = this.selectedZoneId() || (this.zones().length > 0 ? this.zones()[0].id : '');
     this.newTable = {
       zoneId: defaultZone,

@@ -66,6 +66,10 @@ export class AuthService {
     const role = (this._user()?.role || '').toUpperCase();
     return role === 'ADMIN' || this._user()?.username === 'admin';
   });
+  readonly isWaiter = computed(() => {
+    const role = (this._user()?.role || '').toUpperCase();
+    return role === 'WAITER' || role === 'ROLE_WAITER';
+  });
 
   isAdminUser(): boolean {
     return this.isAdmin();
